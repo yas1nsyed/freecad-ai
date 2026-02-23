@@ -28,6 +28,58 @@ def _with_undo(label: str, func):
         return ToolResult(success=False, output="", error=str(e))
 
 
+def _get_body_plane(body, plane_name: str):
+    """Get a plane (XY/XZ/YZ) from a body's origin.
+
+    Uses index-based access into OriginFeatures with error handling.
+    Falls back to searching by Name if OriginFeatures fails (can happen
+    in non-English locales where role-based lookup breaks).
+    """
+    plane_map = {"XY": 3, "XZ": 4, "YZ": 5}
+    idx = plane_map.get(plane_name.upper())
+    if idx is None:
+        return None
+    try:
+        return body.Origin.OriginFeatures[idx]
+    except Exception:
+        pass
+    # Fallback: search document objects by Name prefix
+    try:
+        prefix = plane_name.upper() + "_Plane"
+        for obj in body.Document.Objects:
+            if (obj.Name == prefix or obj.Name.startswith(prefix)) and \
+               obj.TypeId == "App::Plane":
+                return obj
+    except Exception:
+        pass
+    return None
+
+
+def _get_body_axis(body, axis_name: str):
+    """Get an axis (X/Y/Z) from a body's origin.
+
+    Same fallback strategy as _get_body_plane.
+    """
+    axis_map = {"X": 0, "Y": 1, "Z": 2}
+    idx = axis_map.get(axis_name.upper())
+    if idx is None:
+        return None
+    try:
+        return body.Origin.OriginFeatures[idx]
+    except Exception:
+        pass
+    # Fallback: search document objects by Name prefix
+    try:
+        prefix = axis_name.upper() + "_Axis"
+        for obj in body.Document.Objects:
+            if (obj.Name == prefix or obj.Name.startswith(prefix)) and \
+               obj.TypeId == "App::Line":
+                return obj
+    except Exception:
+        pass
+    return None
+
+
 # ── create_primitive ────────────────────────────────────────
 
 def _handle_create_primitive(
@@ -174,13 +226,11 @@ def _handle_create_sketch(
             sketch = doc.addObject("Sketcher::SketchObject", label or "Sketch")
 
         # Attach to plane
-        plane_map = {
-            "XY": 3, "XZ": 4, "YZ": 5,
-        }
-        if body and plane.upper() in plane_map:
-            idx = plane_map[plane.upper()]
-            sketch.AttachmentSupport = [(body.Origin.OriginFeatures[idx], "")]
-            sketch.MapMode = "FlatFace"
+        if body and plane.upper() in ("XY", "XZ", "YZ"):
+            plane_feat = _get_body_plane(body, plane.upper())
+            if plane_feat:
+                sketch.AttachmentSupport = [(plane_feat, "")]
+                sketch.MapMode = "FlatFace"
 
         # Offset the sketch along the plane normal
         if offset != 0:
@@ -222,11 +272,14 @@ def _handle_create_sketch(
                     geo_count += 1
                 elif geo_type == "rectangle":
                     # Accept both (x1,y1,x2,y2) and (x,y,width,height) formats
-                    if "width" in geo and "height" in geo:
+                    # Also accept "length" as alias for "height" (LLMs often confuse these)
+                    rect_w = geo.get("width", None)
+                    rect_h = geo.get("height", None) or geo.get("length", None)
+                    if rect_w is not None and rect_h is not None:
                         x1 = geo.get("x", 0)
                         y1 = geo.get("y", 0)
-                        x2 = x1 + geo["width"]
-                        y2 = y1 + geo["height"]
+                        x2 = x1 + rect_w
+                        y2 = y1 + rect_h
                     else:
                         x1, y1 = geo.get("x1", 0), geo.get("y1", 0)
                         x2, y2 = geo.get("x2", 10), geo.get("y2", 10)
@@ -291,9 +344,16 @@ CREATE_SKETCH = ToolDefinition(
         ToolParam("plane", "string", "Attachment plane: XY, XZ, or YZ", required=False, default="XY",
                   enum=["XY", "XZ", "YZ"]),
         ToolParam("body_name", "string", "Name of PartDesign body to add sketch to", required=False, default=""),
-        ToolParam("geometries", "array", "List of geometry objects. Each has 'type' (line/circle/arc/rectangle) plus type-specific coords.",
+        ToolParam("geometries", "array",
+                  "List of geometry objects. Each has a 'type' key plus type-specific params: "
+                  "line: {x1,y1,x2,y2}, "
+                  "rectangle: {x,y,width,height}, "
+                  "circle: {cx,cy,radius}, "
+                  "arc: {cx,cy,radius,start_angle,end_angle}.",
                   required=False, items={"type": "object"}),
-        ToolParam("constraints", "array", "List of Sketcher constraints. Each has 'type' plus constraint-specific params.",
+        ToolParam("constraints", "array",
+                  "List of Sketcher constraints. Each has 'type' plus constraint-specific params "
+                  "(e.g. {type:'Distance',object1:'Edge1',value:50}).",
                   required=False, items={"type": "object"}),
         ToolParam("label", "string", "Display label for the sketch", required=False, default=""),
         ToolParam("offset", "number", "Offset the sketch along the plane normal (e.g. offset=40 on XY places sketch at z=40)", required=False, default=0.0),
@@ -460,8 +520,7 @@ def _handle_revolve_sketch(
         # Resolve axis reference
         axis_upper = axis.upper()
         if axis_upper in ("X", "Y", "Z"):
-            axis_map = {"X": 0, "Y": 1, "Z": 2}
-            ref = (body.Origin.OriginFeatures[axis_map[axis_upper]], "")
+            ref = (_get_body_axis(body, axis_upper), "")
         else:
             # Edge reference on the sketch: "Edge1", "Edge2", etc.
             ref = (sketch, [axis])
@@ -1210,7 +1269,9 @@ def _handle_create_inner_ridge(
         iw, ih = length - 2 * T - 2 * rw, width - 2 * T - 2 * rw
 
         sketch = body.newObject("Sketcher::SketchObject", label + "Sketch")
-        sketch.AttachmentSupport = [(body.Origin.OriginFeatures[3], "")]  # XY
+        xy_plane = _get_body_plane(body, "XY")
+        if xy_plane:
+            sketch.AttachmentSupport = [(xy_plane, "")]
         sketch.MapMode = "FlatFace"
         sketch.AttachmentOffset = App.Placement(
             App.Vector(0, 0, z_position), App.Rotation())
