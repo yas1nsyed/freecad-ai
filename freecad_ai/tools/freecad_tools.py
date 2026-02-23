@@ -2058,6 +2058,73 @@ SHELL_OBJECT = ToolDefinition(
 )
 
 
+# ── mirror_feature ─────────────────────────────────────────
+
+def _handle_mirror_feature(
+    feature_name: str,
+    plane: str = "YZ",
+    label: str = "",
+) -> ToolResult:
+    """Mirror a PartDesign feature across a plane."""
+
+    def do(doc):
+        feature = _get_object(doc, feature_name)
+        if not feature:
+            return ToolResult(success=False, output="", error=f"Feature '{feature_name}' not found")
+
+        body = _find_body_for(doc, feature)
+        if not body:
+            return ToolResult(
+                success=False, output="",
+                error=f"Feature '{feature_name}' is not inside a PartDesign Body",
+            )
+
+        name = label or "Mirrored"
+        mirror = body.newObject("PartDesign::Mirrored", name)
+        mirror.Originals = [feature]
+
+        # Resolve mirror plane
+        plane_upper = plane.upper()
+        if plane_upper in ("XY", "XZ", "YZ"):
+            plane_obj = _get_body_plane(body, plane_upper)
+            if not plane_obj:
+                return ToolResult(success=False, output="", error=f"Could not find {plane_upper} plane on body")
+            mirror.MirrorPlane = (plane_obj, [""])
+        else:
+            # "Sketch.N_Axis" or "Sketch.V_Axis" format
+            parts = plane.split(".")
+            if len(parts) == 2:
+                ref_obj = _get_object(doc, parts[0])
+                if ref_obj:
+                    mirror.MirrorPlane = (ref_obj, [parts[1]])
+                else:
+                    return ToolResult(success=False, output="", error=f"Reference object '{parts[0]}' not found")
+            else:
+                return ToolResult(success=False, output="", error=f"Invalid plane: {plane}. Use XY/XZ/YZ or Sketch.N_Axis")
+
+        return ToolResult(
+            success=True,
+            output=f"Mirrored '{feature_name}' across {plane}",
+            data={"name": mirror.Name, "label": mirror.Label, "plane": plane},
+        )
+
+    return _with_undo("Mirror Feature", do)
+
+
+MIRROR_FEATURE = ToolDefinition(
+    name="mirror_feature",
+    description="Mirror a PartDesign feature across a plane. The feature must be inside a PartDesign Body.",
+    category="modeling",
+    parameters=[
+        ToolParam("feature_name", "string", "Internal name of the feature to mirror"),
+        ToolParam("plane", "string", "Mirror plane: XY, XZ, YZ (origin planes) or Sketch.N_Axis (sketch axis)",
+                  required=False, default="YZ"),
+        ToolParam("label", "string", "Display label for the mirror", required=False, default=""),
+    ],
+    handler=_handle_mirror_feature,
+)
+
+
 # ── Interactive selection ─────────────────────────────────────
 
 def _handle_select_geometry(prompt="Select geometry", select_type="any", max_count=0):
@@ -2329,6 +2396,7 @@ ALL_TOOLS = [
     LINEAR_PATTERN,
     POLAR_PATTERN,
     SHELL_OBJECT,
+    MIRROR_FEATURE,
     MEASURE,
     GET_DOCUMENT_STATE,
     MODIFY_PROPERTY,

@@ -58,6 +58,7 @@ that perform FreeCAD operations safely. Prefer using tools over generating raw c
 - For scaling objects: use `scale_object`
 - For cross-sections: use `section_object`
 - For repeating features in a line or circle: use `linear_pattern` or `polar_pattern`
+- For mirroring features across a plane: use `mirror_feature`
 - For hollowing out solids (shell): use `shell_object`
 - For screenshots: use `capture_viewport`
 - For camera views (front, top, isometric, etc.): use `set_view`

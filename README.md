@@ -8,7 +8,7 @@ An AI-powered assistant workbench for FreeCAD that generates and executes Python
 
 - **Chat interface** — dock widget with streaming LLM responses
 - **Plan / Act modes** — review code before execution (Plan) or auto-execute (Act)
-- **Tool calling** — 31 structured FreeCAD operations (Act mode) for safer, more reliable modeling
+- **Tool calling** — 32 structured FreeCAD operations (Act mode) for safer, more reliable modeling
 - **Skills** — reusable instruction sets invoked via `/command` (enclosure, gear, fastener holes, etc.)
 - **Thinking mode** — enable LLM reasoning for complex multi-step tasks (Off / On / Extended)
 - **Context compacting** — automatically summarizes older messages when approaching context limits
@@ -105,6 +105,7 @@ Tool calling is enabled by default. Disable it by setting `enable_tools: false` 
 | `fillet_edges` | Round edges |
 | `chamfer_edges` | Chamfer edges |
 | `shell_object` | Hollow out a solid (PartDesign::Thickness) |
+| `mirror_feature` | Mirror a PartDesign feature across a plane |
 | `create_wedge` | Create a wedge/ramp shape |
 | `scale_object` | Scale an object uniformly or per-axis |
 | `section_object` | Cross-section through a plane or another object |
@@ -232,7 +233,7 @@ freecad-ai/
 │   │   └── providers.py       # Provider registry
 │   ├── tools/
 │   │   ├── registry.py        # Tool abstractions + registry
-│   │   ├── freecad_tools.py   # 31 FreeCAD tool handlers
+│   │   ├── freecad_tools.py   # 32 FreeCAD tool handlers
 │   │   └── setup.py           # Default registry factory
 │   ├── ui/
 │   │   ├── compat.py          # PySide2/PySide6 shim

@@ -11,13 +11,14 @@ from freecad_ai.tools.freecad_tools import (
     LINEAR_PATTERN,
     POLAR_PATTERN,
     SHELL_OBJECT,
+    MIRROR_FEATURE,
     CAPTURE_VIEWPORT,
     SET_VIEW,
     ZOOM_OBJECT,
 )
 
 
-NEW_TOOLS = [CREATE_WEDGE, SCALE_OBJECT, SECTION_OBJECT, LINEAR_PATTERN, POLAR_PATTERN, SHELL_OBJECT]
+NEW_TOOLS = [CREATE_WEDGE, SCALE_OBJECT, SECTION_OBJECT, LINEAR_PATTERN, POLAR_PATTERN, SHELL_OBJECT, MIRROR_FEATURE]
 
 
 class TestToolDefinitions:
@@ -30,6 +31,7 @@ class TestToolDefinitions:
         (LINEAR_PATTERN, "linear_pattern"),
         (POLAR_PATTERN, "polar_pattern"),
         (SHELL_OBJECT, "shell_object"),
+        (MIRROR_FEATURE, "mirror_feature"),
     ])
     def test_tool_names(self, tool, expected_name):
         assert tool.name == expected_name
@@ -119,6 +121,17 @@ class TestToolDefinitions:
         faces_param = next(p for p in SHELL_OBJECT.parameters if p.name == "faces")
         assert faces_param.type == "array"
         assert faces_param.items == {"type": "string"}
+
+    def test_mirror_feature_params(self):
+        names = [p.name for p in MIRROR_FEATURE.parameters]
+        required = [p.name for p in MIRROR_FEATURE.parameters if p.required]
+        assert "feature_name" in required
+        assert "plane" in names
+        assert "label" in names
+        # plane default should be YZ
+        plane_param = next(p for p in MIRROR_FEATURE.parameters if p.name == "plane")
+        assert plane_param.default == "YZ"
+        assert plane_param.required is False
 
 
 class TestAllToolsMembership:
