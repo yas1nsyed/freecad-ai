@@ -55,9 +55,14 @@ class TestToolDefinitions:
         assert "height" in names
         assert "top_length" in names
         assert "top_width" in names
+        assert "body_name" in names
+        assert "operation" in names
         # All optional (wedge has sensible defaults)
         for p in CREATE_WEDGE.parameters:
             assert p.required is False
+        # operation should have enum
+        op_param = next(p for p in CREATE_WEDGE.parameters if p.name == "operation")
+        assert op_param.enum == ["additive", "subtractive"]
 
     def test_scale_object_params(self):
         names = [p.name for p in SCALE_OBJECT.parameters]

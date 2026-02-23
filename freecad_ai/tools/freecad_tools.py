@@ -1666,42 +1666,117 @@ def _handle_create_wedge(
     top_length: float | None = None,
     top_width: float | None = None,
     label: str = "",
+    body_name: str = "",
+    operation: str = "additive",
     x: float = 0.0,
     y: float = 0.0,
     z: float = 0.0,
 ) -> ToolResult:
-    """Create a Part::Wedge — a tapered box."""
+    """Create a wedge (tapered box) as a PartDesign loft between two rectangular sketches."""
     import FreeCAD as App
+    import Part
+    import Sketcher
+
+    def _add_rect(sketch, x1, y1, x2, y2):
+        """Add a closed rectangle to a sketch with coincident + H/V constraints."""
+        sketch.addGeometry(Part.LineSegment(App.Vector(x1, y1, 0), App.Vector(x2, y1, 0)))
+        sketch.addGeometry(Part.LineSegment(App.Vector(x2, y1, 0), App.Vector(x2, y2, 0)))
+        sketch.addGeometry(Part.LineSegment(App.Vector(x2, y2, 0), App.Vector(x1, y2, 0)))
+        sketch.addGeometry(Part.LineSegment(App.Vector(x1, y2, 0), App.Vector(x1, y1, 0)))
+        g = sketch.GeometryCount - 4
+        sketch.addConstraint(Sketcher.Constraint("Coincident", g, 2, g + 1, 1))
+        sketch.addConstraint(Sketcher.Constraint("Coincident", g + 1, 2, g + 2, 1))
+        sketch.addConstraint(Sketcher.Constraint("Coincident", g + 2, 2, g + 3, 1))
+        sketch.addConstraint(Sketcher.Constraint("Coincident", g + 3, 2, g, 1))
+        sketch.addConstraint(Sketcher.Constraint("Horizontal", g))
+        sketch.addConstraint(Sketcher.Constraint("Horizontal", g + 2))
+        sketch.addConstraint(Sketcher.Constraint("Vertical", g + 1))
+        sketch.addConstraint(Sketcher.Constraint("Vertical", g + 3))
 
     def do(doc):
         tl = top_length if top_length is not None else length
         tw = top_width if top_width is not None else 0.0
+        # Clamp degenerate dimensions — lofting a rect to a line/point is unreliable
+        tl = max(tl, 0.01)
+        tw = max(tw, 0.01)
 
-        name = label or "Wedge"
-        obj = doc.addObject("Part::Wedge", name)
-        obj.Label = name
+        op = operation.lower()
 
-        # Base face
-        obj.Xmin = 0.0
-        obj.Xmax = length
-        obj.Ymin = 0.0
-        obj.Ymax = height
-        obj.Zmin = 0.0
-        obj.Zmax = width
+        # Get or create body
+        if body_name:
+            body = _get_object(doc, body_name)
+            if not body:
+                return ToolResult(
+                    success=False, output="",
+                    error=f"Body '{body_name}' not found",
+                )
+        else:
+            body_label = label or "Wedge"
+            body = doc.addObject("PartDesign::Body", body_label)
+            body.Label = body_label
 
-        # Top face (centered)
-        obj.X2min = (length - tl) / 2
-        obj.X2max = (length + tl) / 2
-        obj.Z2min = (width - tw) / 2
-        obj.Z2max = (width + tw) / 2
+        # Attach sketches to XY plane
+        xy_plane = _get_body_plane(body, "XY")
+        if not xy_plane:
+            return ToolResult(
+                success=False, output="",
+                error="Cannot find XY plane in body's origin",
+            )
 
+        # Bottom sketch: rectangle (0,0) to (length, width) on XY plane
+        bot = body.newObject("Sketcher::SketchObject", "WedgeBase")
+        bot.AttachmentSupport = [(xy_plane, "")]
+        bot.MapMode = "FlatFace"
+        doc.recompute()
+        _add_rect(bot, 0, 0, length, width)
+
+        # Top sketch: centered top rectangle at z=height
+        top = body.newObject("Sketcher::SketchObject", "WedgeTop")
+        top.AttachmentSupport = [(xy_plane, "")]
+        top.MapMode = "FlatFace"
+        top.AttachmentOffset = App.Placement(
+            App.Vector(0, 0, height), App.Rotation()
+        )
+        doc.recompute()
+        tx1 = (length - tl) / 2
+        ty1 = (width - tw) / 2
+        _add_rect(top, tx1, ty1, tx1 + tl, ty1 + tw)
+
+        doc.recompute()
+
+        # Loft between the two sketches
+        if op == "subtractive":
+            type_name = "PartDesign::SubtractiveLoft"
+        else:
+            type_name = "PartDesign::AdditiveLoft"
+        feat_label = label or "Wedge"
+        feat = body.newObject(type_name, feat_label)
+        feat.Profile = bot
+        feat.Sections = [top]
+        feat.Ruled = True
+
+        bot.Visibility = False
+        top.Visibility = False
+
+        # Position the body if needed
         if x != 0 or y != 0 or z != 0:
-            obj.Placement.Base = App.Vector(x, y, z)
+            body.Placement.Base = App.Vector(x, y, z)
+
+        doc.recompute()
 
         return ToolResult(
             success=True,
-            output=f"Created wedge '{obj.Label}' ({length}x{width}x{height}mm, top: {tl}x{tw}mm)",
-            data={"name": obj.Name, "label": obj.Label},
+            output=(
+                f"Created {op} wedge '{feat.Label}' ({feat.Name}) in body "
+                f"'{body.Label}' ({body.Name}) — "
+                f"{length}x{width}x{height}mm, top: {tl}x{tw}mm"
+            ),
+            data={
+                "name": feat.Name,
+                "label": feat.Label,
+                "body_name": body.Name,
+                "body_label": body.Label,
+            },
         )
 
     return _with_undo("Create Wedge", do)
@@ -1709,15 +1784,18 @@ def _handle_create_wedge(
 
 CREATE_WEDGE = ToolDefinition(
     name="create_wedge",
-    description="Create a wedge (tapered box). The base is length x width, the top face is top_length x top_width (centered). Default top_width=0 creates a classic ramp/wedge shape.",
+    description="Create a PartDesign wedge (tapered box) inside a Body via loft. Base is length x width, top face is top_length x top_width (centered). Default top_width=0 creates a classic ramp/wedge shape. Compatible with fillet, chamfer, shell, pattern, mirror.",
     category="modeling",
     parameters=[
         ToolParam("length", "number", "Base length (X dimension)", required=False, default=10.0),
-        ToolParam("width", "number", "Base width (Z dimension)", required=False, default=10.0),
-        ToolParam("height", "number", "Height (Y dimension)", required=False, default=10.0),
+        ToolParam("width", "number", "Base width (Y dimension)", required=False, default=10.0),
+        ToolParam("height", "number", "Height (Z dimension)", required=False, default=10.0),
         ToolParam("top_length", "number", "Top face length (defaults to base length = no taper in X)", required=False),
         ToolParam("top_width", "number", "Top face width (defaults to 0 = tapers to ridge)", required=False),
         ToolParam("label", "string", "Display label", required=False, default=""),
+        ToolParam("body_name", "string", "Name of existing Body to add wedge to (auto-creates if empty)", required=False, default=""),
+        ToolParam("operation", "string", "Additive (add material) or subtractive (cut material)",
+                  required=False, default="additive", enum=["additive", "subtractive"]),
         ToolParam("x", "number", "X position", required=False, default=0.0),
         ToolParam("y", "number", "Y position", required=False, default=0.0),
         ToolParam("z", "number", "Z position", required=False, default=0.0),
