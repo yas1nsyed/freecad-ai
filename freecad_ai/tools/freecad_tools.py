@@ -85,6 +85,8 @@ def _get_body_axis(body, axis_name: str):
 def _handle_create_primitive(
     shape_type: str,
     label: str = "",
+    body_name: str = "",
+    operation: str = "additive",
     length: float = 10.0,
     width: float = 10.0,
     height: float = 10.0,
@@ -94,29 +96,57 @@ def _handle_create_primitive(
     y: float = 0.0,
     z: float = 0.0,
 ) -> ToolResult:
-    """Create a Part primitive (Box, Cylinder, Sphere, Cone, Torus)."""
+    """Create a PartDesign primitive (Box, Cylinder, Sphere, Cone, Torus) inside a Body."""
     import FreeCAD as App
 
+    additive_map = {
+        "box": "PartDesign::AdditiveBox",
+        "cylinder": "PartDesign::AdditiveCylinder",
+        "sphere": "PartDesign::AdditiveSphere",
+        "cone": "PartDesign::AdditiveCone",
+        "torus": "PartDesign::AdditiveTorus",
+    }
+    subtractive_map = {
+        "box": "PartDesign::SubtractiveBox",
+        "cylinder": "PartDesign::SubtractiveCylinder",
+        "sphere": "PartDesign::SubtractiveSphere",
+        "cone": "PartDesign::SubtractiveCone",
+        "torus": "PartDesign::SubtractiveTorus",
+    }
+
     def do(doc):
-        type_map = {
-            "box": "Part::Box",
-            "cylinder": "Part::Cylinder",
-            "sphere": "Part::Sphere",
-            "cone": "Part::Cone",
-            "torus": "Part::Torus",
-        }
-        part_type = type_map.get(shape_type.lower())
-        if not part_type:
+        st = shape_type.lower()
+        op = operation.lower()
+
+        if op == "subtractive":
+            type_map = subtractive_map
+        else:
+            type_map = additive_map
+
+        pd_type = type_map.get(st)
+        if not pd_type:
             return ToolResult(
                 success=False, output="",
-                error=f"Unknown shape type: {shape_type}. Use: {list(type_map.keys())}"
+                error=f"Unknown shape type: {shape_type}. Use: {list(additive_map.keys())}"
             )
 
-        name = label or shape_type.capitalize()
-        obj = doc.addObject(part_type, name)
+        # Get or create body
+        if body_name:
+            body = _get_object(doc, body_name)
+            if not body:
+                return ToolResult(
+                    success=False, output="",
+                    error=f"Body '{body_name}' not found"
+                )
+        else:
+            body_label = label or st.capitalize()
+            body = doc.addObject("PartDesign::Body", body_label)
+            body.Label = body_label
+
+        name = label or st.capitalize()
+        obj = body.newObject(pd_type, name)
         obj.Label = name
 
-        st = shape_type.lower()
         if st == "box":
             obj.Length = length
             obj.Width = width
@@ -139,8 +169,9 @@ def _handle_create_primitive(
 
         return ToolResult(
             success=True,
-            output=f"Created {shape_type} '{obj.Label}' ({obj.Name})",
-            data={"name": obj.Name, "label": obj.Label, "type": part_type},
+            output=f"Created {op} {st} '{obj.Label}' ({obj.Name}) in body '{body.Label}' ({body.Name})",
+            data={"name": obj.Name, "label": obj.Label, "type": pd_type,
+                  "body_name": body.Name, "body_label": body.Label},
         )
 
     return _with_undo(f"Create {shape_type}", do)
@@ -148,12 +179,15 @@ def _handle_create_primitive(
 
 CREATE_PRIMITIVE = ToolDefinition(
     name="create_primitive",
-    description="Create a 3D primitive shape (Box, Cylinder, Sphere, Cone, Torus) in the active document.",
+    description="Create a PartDesign primitive (Box, Cylinder, Sphere, Cone, Torus) inside a Body. Auto-creates a Body if body_name is not given. Use operation='subtractive' to cut material from an existing body.",
     category="modeling",
     parameters=[
         ToolParam("shape_type", "string", "Type of primitive to create",
                   enum=["box", "cylinder", "sphere", "cone", "torus"]),
         ToolParam("label", "string", "Display label for the object", required=False, default=""),
+        ToolParam("body_name", "string", "Name of existing Body to add primitive to (auto-creates if empty)", required=False, default=""),
+        ToolParam("operation", "string", "Additive (add material) or subtractive (cut material)",
+                  required=False, default="additive", enum=["additive", "subtractive"]),
         ToolParam("length", "number", "Length (box)", required=False, default=10.0),
         ToolParam("width", "number", "Width (box)", required=False, default=10.0),
         ToolParam("height", "number", "Height (box/cylinder/cone)", required=False, default=10.0),
@@ -2026,10 +2060,12 @@ def _handle_shell_object(
             shell.Join = join_map.get(join, 0)
             shell.Reversed = reversed
         else:
-            shell = doc.addObject("Part::Offset3D", label or "Shell")
-            shell.Source = obj
-            shell.Value = -thickness
-            shell.Join = join_map.get(join, 0)
+            return ToolResult(
+                success=False, output="",
+                error=f"Object '{object_name}' is not inside a PartDesign Body. "
+                      "shell_object requires a PartDesign Body. Use create_body + create_sketch + pad_sketch "
+                      "to create the solid, then apply shell_object.",
+            )
 
         return ToolResult(
             success=True,
@@ -2079,6 +2115,19 @@ def _handle_mirror_feature(
                 error=f"Feature '{feature_name}' is not inside a PartDesign Body",
             )
 
+        # Only additive/subtractive features can be transformed
+        if hasattr(feature, "isDerivedFrom") and feature.isDerivedFrom("PartDesign::Transformed"):
+            originals = getattr(feature, "Originals", [])
+            hint = ""
+            if originals:
+                hint = f" Try mirroring '{originals[0].Name}' instead."
+            return ToolResult(
+                success=False, output="",
+                error=f"Feature '{feature_name}' is a transformation (Mirrored/Pattern) and cannot be mirrored. "
+                      f"Only additive features (Pad, Loft, etc.) and subtractive features (Pocket, Groove, etc.) "
+                      f"can be mirrored.{hint}",
+            )
+
         name = label or "Mirrored"
         mirror = body.newObject("PartDesign::Mirrored", name)
         mirror.Originals = [feature]
@@ -2113,7 +2162,7 @@ def _handle_mirror_feature(
 
 MIRROR_FEATURE = ToolDefinition(
     name="mirror_feature",
-    description="Mirror a PartDesign feature across a plane. The feature must be inside a PartDesign Body.",
+    description="Mirror a PartDesign feature across a plane. The feature must be an additive (Pad, Loft, etc.) or subtractive (Pocket, Groove, etc.) feature inside a Body. Cannot mirror other transformations (Mirrored, LinearPattern, PolarPattern) — mirror the original feature instead.",
     category="modeling",
     parameters=[
         ToolParam("feature_name", "string", "Internal name of the feature to mirror"),

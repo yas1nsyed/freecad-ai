@@ -49,8 +49,8 @@ that perform FreeCAD operations safely. Prefer using tools over generating raw c
 - After tool calls, explain what was done in natural language
 
 **Tool calling strategy:**
-- For simple primitives: use `create_primitive`
-- For parametric parts: first `create_body`, then `create_sketch` (with body_name) + `pad_sketch` / `pocket_sketch`
+- For solid shapes (box, cylinder, sphere, cone, torus): use `create_primitive` (auto-creates a Body; pass body_name to add to an existing Body, operation="subtractive" to cut)
+- For complex profiles or swept shapes: `create_body` → `create_sketch` → `pad_sketch` / `pocket_sketch` / `revolve_sketch`
 - For booleans: use `boolean_operation`
 - For transformations: use `transform_object`
 - For edge operations: use `fillet_edges` or `chamfer_edges`
