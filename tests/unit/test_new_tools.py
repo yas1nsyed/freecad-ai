@@ -12,13 +12,14 @@ from freecad_ai.tools.freecad_tools import (
     POLAR_PATTERN,
     SHELL_OBJECT,
     MIRROR_FEATURE,
+    MULTI_TRANSFORM,
     CAPTURE_VIEWPORT,
     SET_VIEW,
     ZOOM_OBJECT,
 )
 
 
-NEW_TOOLS = [CREATE_WEDGE, SCALE_OBJECT, SECTION_OBJECT, LINEAR_PATTERN, POLAR_PATTERN, SHELL_OBJECT, MIRROR_FEATURE]
+NEW_TOOLS = [CREATE_WEDGE, SCALE_OBJECT, SECTION_OBJECT, LINEAR_PATTERN, POLAR_PATTERN, SHELL_OBJECT, MIRROR_FEATURE, MULTI_TRANSFORM]
 
 
 class TestToolDefinitions:
@@ -32,6 +33,7 @@ class TestToolDefinitions:
         (POLAR_PATTERN, "polar_pattern"),
         (SHELL_OBJECT, "shell_object"),
         (MIRROR_FEATURE, "mirror_feature"),
+        (MULTI_TRANSFORM, "multi_transform"),
     ])
     def test_tool_names(self, tool, expected_name):
         assert tool.name == expected_name
@@ -137,6 +139,22 @@ class TestToolDefinitions:
         plane_param = next(p for p in MIRROR_FEATURE.parameters if p.name == "plane")
         assert plane_param.default == "YZ"
         assert plane_param.required is False
+
+    def test_multi_transform_params(self):
+        names = [p.name for p in MULTI_TRANSFORM.parameters]
+        required = [p.name for p in MULTI_TRANSFORM.parameters if p.required]
+        assert "feature_name" in required
+        assert "transformations" in required
+        assert "label" in names
+        # label should be optional
+        label_param = next(p for p in MULTI_TRANSFORM.parameters if p.name == "label")
+        assert label_param.required is False
+        # transformations should be array with object items
+        trans_param = next(p for p in MULTI_TRANSFORM.parameters if p.name == "transformations")
+        assert trans_param.type == "array"
+        assert trans_param.items is not None
+        assert trans_param.items["type"] == "object"
+        assert "type" in trans_param.items["required"]
 
 
 class TestAllToolsMembership:

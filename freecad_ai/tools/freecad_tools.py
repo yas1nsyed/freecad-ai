@@ -2252,6 +2252,174 @@ MIRROR_FEATURE = ToolDefinition(
 )
 
 
+# ── multi_transform ────────────────────────────────────────
+
+def _handle_multi_transform(
+    feature_name: str,
+    transformations: list,
+    label: str = "",
+) -> ToolResult:
+    """Chain multiple transformation steps (linear, polar, mirror) into one MultiTransform feature."""
+
+    if not transformations:
+        return ToolResult(success=False, output="", error="transformations list must not be empty")
+
+    def do(doc):
+        feature = _get_object(doc, feature_name)
+        if not feature:
+            return ToolResult(success=False, output="", error=f"Feature '{feature_name}' not found")
+
+        body = _find_body_for(doc, feature)
+        if not body:
+            return ToolResult(
+                success=False, output="",
+                error=f"Feature '{feature_name}' is not inside a PartDesign Body",
+            )
+
+        # Reject transformation features (same guard as mirror_feature)
+        if hasattr(feature, "isDerivedFrom") and feature.isDerivedFrom("PartDesign::Transformed"):
+            originals = getattr(feature, "Originals", [])
+            hint = ""
+            if originals:
+                hint = f" Try transforming '{originals[0].Name}' instead."
+            return ToolResult(
+                success=False, output="",
+                error=f"Feature '{feature_name}' is a transformation and cannot be multi-transformed. "
+                      f"Only additive/subtractive features can be used.{hint}",
+            )
+
+        name = label or "MultiTransform"
+        multi = body.newObject("PartDesign::MultiTransform", name)
+        multi.Originals = [feature]
+
+        sub_features = []
+        descriptions = []
+
+        for i, step in enumerate(transformations):
+            step_type = step.get("type", "")
+
+            if step_type == "linear_pattern":
+                sub = body.newObject("PartDesign::LinearPattern", f"LP{i}")
+                direction = step.get("direction", "X")
+                dir_upper = direction.upper()
+                if dir_upper in ("X", "Y", "Z"):
+                    axis = _get_body_axis(body, dir_upper)
+                    if not axis:
+                        return ToolResult(success=False, output="", error=f"Step {i}: could not find {dir_upper} axis")
+                    sub.Direction = (axis, [""])
+                else:
+                    parts = direction.split(".")
+                    if len(parts) == 2:
+                        ref_obj = _get_object(doc, parts[0])
+                        if ref_obj:
+                            sub.Direction = (ref_obj, [parts[1]])
+                        else:
+                            return ToolResult(success=False, output="", error=f"Step {i}: reference '{parts[0]}' not found")
+                    else:
+                        return ToolResult(success=False, output="", error=f"Step {i}: invalid direction '{direction}'")
+                sub.Length = step.get("length", 10.0)
+                sub.Occurrences = step.get("occurrences", 2)
+                sub_features.append(sub)
+                descriptions.append(f"linear({dir_upper}, {sub.Length}mm, {sub.Occurrences}x)")
+
+            elif step_type == "polar_pattern":
+                sub = body.newObject("PartDesign::PolarPattern", f"PP{i}")
+                axis = step.get("axis", "Z")
+                axis_upper = axis.upper()
+                if axis_upper in ("X", "Y", "Z"):
+                    axis_obj = _get_body_axis(body, axis_upper)
+                    if not axis_obj:
+                        return ToolResult(success=False, output="", error=f"Step {i}: could not find {axis_upper} axis")
+                    sub.Axis = (axis_obj, [""])
+                else:
+                    parts = axis.split(".")
+                    if len(parts) == 2:
+                        ref_obj = _get_object(doc, parts[0])
+                        if ref_obj:
+                            sub.Axis = (ref_obj, [parts[1]])
+                        else:
+                            return ToolResult(success=False, output="", error=f"Step {i}: reference '{parts[0]}' not found")
+                    else:
+                        return ToolResult(success=False, output="", error=f"Step {i}: invalid axis '{axis}'")
+                sub.Angle = step.get("angle", 360.0)
+                sub.Occurrences = step.get("occurrences", 2)
+                sub_features.append(sub)
+                descriptions.append(f"polar({axis_upper}, {sub.Angle}°, {sub.Occurrences}x)")
+
+            elif step_type == "mirror":
+                sub = body.newObject("PartDesign::Mirrored", f"MR{i}")
+                plane = step.get("plane", "YZ")
+                plane_upper = plane.upper()
+                if plane_upper in ("XY", "XZ", "YZ"):
+                    plane_obj = _get_body_plane(body, plane_upper)
+                    if not plane_obj:
+                        return ToolResult(success=False, output="", error=f"Step {i}: could not find {plane_upper} plane")
+                    sub.MirrorPlane = (plane_obj, [""])
+                else:
+                    parts = plane.split(".")
+                    if len(parts) == 2:
+                        ref_obj = _get_object(doc, parts[0])
+                        if ref_obj:
+                            sub.MirrorPlane = (ref_obj, [parts[1]])
+                        else:
+                            return ToolResult(success=False, output="", error=f"Step {i}: reference '{parts[0]}' not found")
+                    else:
+                        return ToolResult(success=False, output="", error=f"Step {i}: invalid plane '{plane}'")
+                sub_features.append(sub)
+                descriptions.append(f"mirror({plane_upper})")
+
+            else:
+                return ToolResult(
+                    success=False, output="",
+                    error=f"Step {i}: unknown type '{step_type}'. Use linear_pattern, polar_pattern, or mirror",
+                )
+
+        multi.Transformations = sub_features
+        body.Tip = multi
+
+        return ToolResult(
+            success=True,
+            output=f"Created MultiTransform on '{feature_name}' with {len(sub_features)} step(s): {', '.join(descriptions)}",
+            data={"name": multi.Name, "label": multi.Label, "steps": len(sub_features)},
+        )
+
+    return _with_undo("Multi Transform", do)
+
+
+MULTI_TRANSFORM = ToolDefinition(
+    name="multi_transform",
+    description=(
+        "Chain multiple transformation steps (linear pattern, polar pattern, mirror) into a single "
+        "PartDesign::MultiTransform feature. Cleaner than stacking separate pattern/mirror features "
+        "and avoids 'transformation of a transformation' errors. The feature must be an additive or "
+        "subtractive feature inside a Body."
+    ),
+    category="modeling",
+    parameters=[
+        ToolParam("feature_name", "string", "Internal name of the feature to transform"),
+        ToolParam("transformations", "array",
+                  "List of transformation steps. Each is an object with 'type' (linear_pattern, polar_pattern, mirror) "
+                  "plus type-specific params. linear_pattern: direction (X/Y/Z), length, occurrences. "
+                  "polar_pattern: axis (X/Y/Z), angle, occurrences. mirror: plane (XY/XZ/YZ).",
+                  items={
+                      "type": "object",
+                      "properties": {
+                          "type": {"type": "string", "enum": ["linear_pattern", "polar_pattern", "mirror"]},
+                          "direction": {"type": "string"},
+                          "length": {"type": "number"},
+                          "occurrences": {"type": "integer"},
+                          "axis": {"type": "string"},
+                          "angle": {"type": "number"},
+                          "plane": {"type": "string"},
+                      },
+                      "required": ["type"],
+                  }),
+        ToolParam("label", "string", "Display label for the MultiTransform", required=False, default=""),
+    ],
+    handler=_handle_multi_transform,
+)
+
+
 # ── Interactive selection ─────────────────────────────────────
 
 def _handle_select_geometry(prompt="Select geometry", select_type="any", max_count=0):
@@ -2524,6 +2692,7 @@ ALL_TOOLS = [
     POLAR_PATTERN,
     SHELL_OBJECT,
     MIRROR_FEATURE,
+    MULTI_TRANSFORM,
     MEASURE,
     GET_DOCUMENT_STATE,
     MODIFY_PROPERTY,
