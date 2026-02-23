@@ -7,6 +7,28 @@ Tools are designed to be called by the LLM via structured tool calling.
 from .registry import ToolParam, ToolDefinition, ToolResult
 
 
+def _coerce_str_list(value):
+    """Coerce a stringified list into an actual list.
+
+    LLMs sometimes send ``"['Face1', 'Face6']"`` (a string) instead of
+    ``["Face1", "Face6"]`` (a JSON array).  This helper detects and parses
+    that so tool handlers get a real list.
+    """
+    if value is None:
+        return None
+    if isinstance(value, list):
+        return value
+    if isinstance(value, str):
+        import ast
+        try:
+            parsed = ast.literal_eval(value)
+            if isinstance(parsed, list):
+                return parsed
+        except (ValueError, SyntaxError):
+            pass
+    return value
+
+
 def _with_undo(label: str, func):
     """Run func inside a FreeCAD undo transaction. Returns ToolResult."""
     import FreeCAD as App
@@ -908,7 +930,7 @@ def _handle_fillet_edges(
         if not obj:
             return ToolResult(success=False, output="", error=f"Object '{object_name}' not found")
 
-        edge_refs = edges or ["Edge1"]
+        edge_refs = _coerce_str_list(edges) or ["Edge1"]
 
         # Check if this is a PartDesign body/feature
         body = _find_body_for(doc, obj)
@@ -962,7 +984,7 @@ def _handle_chamfer_edges(
         if not obj:
             return ToolResult(success=False, output="", error=f"Object '{object_name}' not found")
 
-        edge_refs = edges or ["Edge1"]
+        edge_refs = _coerce_str_list(edges) or ["Edge1"]
 
         body = _find_body_for(doc, obj)
         if body:
@@ -2127,7 +2149,7 @@ def _handle_shell_object(
         if not obj:
             return ToolResult(success=False, output="", error=f"Object '{object_name}' not found")
 
-        face_refs = faces or ["Face1"]
+        face_refs = _coerce_str_list(faces) or ["Face1"]
         join_map = {"Arc": 0, "Intersection": 1}
 
         body = _find_body_for(doc, obj)
@@ -2376,6 +2398,11 @@ def _handle_multi_transform(
 
         multi.Transformations = sub_features
         body.Tip = multi
+
+        # Ensure visibility: sub-features should be hidden, multi should be visible
+        for sub in sub_features:
+            sub.Visibility = False
+        multi.Visibility = True
 
         return ToolResult(
             success=True,
