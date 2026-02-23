@@ -229,7 +229,7 @@ class _LLMWorker(QThread):
 
         # Wait for result with timeout (30s) to avoid deadlock
         self._tool_result_ready.lock()
-        deadline = 30000  # ms
+        deadline = 300000  # ms (5 min, for interactive tools like select_geometry)
         while self._pending_result is None:
             if not self._tool_result_wait.wait(self._tool_result_ready, deadline):
                 # Timed out

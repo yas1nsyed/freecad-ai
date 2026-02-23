@@ -1623,6 +1623,658 @@ CREATE_ENCLOSURE_LID = ToolDefinition(
 )
 
 
+# ── create_wedge ───────────────────────────────────────────
+
+def _handle_create_wedge(
+    length: float = 10.0,
+    width: float = 10.0,
+    height: float = 10.0,
+    top_length: float | None = None,
+    top_width: float | None = None,
+    label: str = "",
+    x: float = 0.0,
+    y: float = 0.0,
+    z: float = 0.0,
+) -> ToolResult:
+    """Create a Part::Wedge — a tapered box."""
+    import FreeCAD as App
+
+    def do(doc):
+        tl = top_length if top_length is not None else length
+        tw = top_width if top_width is not None else 0.0
+
+        name = label or "Wedge"
+        obj = doc.addObject("Part::Wedge", name)
+        obj.Label = name
+
+        # Base face
+        obj.Xmin = 0.0
+        obj.Xmax = length
+        obj.Ymin = 0.0
+        obj.Ymax = height
+        obj.Zmin = 0.0
+        obj.Zmax = width
+
+        # Top face (centered)
+        obj.X2min = (length - tl) / 2
+        obj.X2max = (length + tl) / 2
+        obj.Z2min = (width - tw) / 2
+        obj.Z2max = (width + tw) / 2
+
+        if x != 0 or y != 0 or z != 0:
+            obj.Placement.Base = App.Vector(x, y, z)
+
+        return ToolResult(
+            success=True,
+            output=f"Created wedge '{obj.Label}' ({length}x{width}x{height}mm, top: {tl}x{tw}mm)",
+            data={"name": obj.Name, "label": obj.Label},
+        )
+
+    return _with_undo("Create Wedge", do)
+
+
+CREATE_WEDGE = ToolDefinition(
+    name="create_wedge",
+    description="Create a wedge (tapered box). The base is length x width, the top face is top_length x top_width (centered). Default top_width=0 creates a classic ramp/wedge shape.",
+    category="modeling",
+    parameters=[
+        ToolParam("length", "number", "Base length (X dimension)", required=False, default=10.0),
+        ToolParam("width", "number", "Base width (Z dimension)", required=False, default=10.0),
+        ToolParam("height", "number", "Height (Y dimension)", required=False, default=10.0),
+        ToolParam("top_length", "number", "Top face length (defaults to base length = no taper in X)", required=False),
+        ToolParam("top_width", "number", "Top face width (defaults to 0 = tapers to ridge)", required=False),
+        ToolParam("label", "string", "Display label", required=False, default=""),
+        ToolParam("x", "number", "X position", required=False, default=0.0),
+        ToolParam("y", "number", "Y position", required=False, default=0.0),
+        ToolParam("z", "number", "Z position", required=False, default=0.0),
+    ],
+    handler=_handle_create_wedge,
+)
+
+
+# ── scale_object ──────────────────────────────────────────
+
+def _handle_scale_object(
+    object_name: str,
+    scale_x: float = 1.0,
+    scale_y: float = 1.0,
+    scale_z: float = 1.0,
+    uniform: float = 0.0,
+    copy: bool = False,
+    label: str = "",
+) -> ToolResult:
+    """Scale an object non-uniformly via shape.transformGeometry()."""
+    import FreeCAD as App
+
+    def do(doc):
+        obj = _get_object(doc, object_name)
+        if not obj:
+            return ToolResult(success=False, output="", error=f"Object '{object_name}' not found")
+
+        if hasattr(obj, "TypeId") and obj.TypeId == "PartDesign::Body":
+            return ToolResult(
+                success=False, output="",
+                error="Cannot scale a PartDesign::Body directly. Scale individual Part objects instead."
+            )
+
+        if not hasattr(obj, "Shape"):
+            return ToolResult(success=False, output="", error=f"Object '{object_name}' has no Shape")
+
+        sx = uniform if uniform != 0 else scale_x
+        sy = uniform if uniform != 0 else scale_y
+        sz = uniform if uniform != 0 else scale_z
+
+        mat = App.Matrix()
+        mat.scale(sx, sy, sz)
+        new_shape = obj.Shape.transformGeometry(mat)
+
+        if copy:
+            new_name = label or f"{obj.Label}_Scaled"
+            new_obj = doc.addObject("Part::Feature", new_name)
+            new_obj.Label = new_name
+            new_obj.Shape = new_shape
+            return ToolResult(
+                success=True,
+                output=f"Created scaled copy '{new_obj.Label}' (scale: {sx}, {sy}, {sz})",
+                data={"name": new_obj.Name, "label": new_obj.Label},
+            )
+        else:
+            obj.Shape = new_shape
+            return ToolResult(
+                success=True,
+                output=f"Scaled '{obj.Label}' by ({sx}, {sy}, {sz})",
+                data={"name": obj.Name, "label": obj.Label},
+            )
+
+    return _with_undo("Scale Object", do)
+
+
+SCALE_OBJECT = ToolDefinition(
+    name="scale_object",
+    description="Scale an object uniformly or non-uniformly. Works on Part objects (not PartDesign bodies). Set uniform>0 to scale all axes equally.",
+    category="modeling",
+    parameters=[
+        ToolParam("object_name", "string", "Internal name of the object to scale"),
+        ToolParam("scale_x", "number", "X scale factor", required=False, default=1.0),
+        ToolParam("scale_y", "number", "Y scale factor", required=False, default=1.0),
+        ToolParam("scale_z", "number", "Z scale factor", required=False, default=1.0),
+        ToolParam("uniform", "number", "Uniform scale (overrides x/y/z if non-zero)", required=False, default=0.0),
+        ToolParam("copy", "boolean", "Create a scaled copy instead of modifying in-place", required=False, default=False),
+        ToolParam("label", "string", "Label for the copy (only used with copy=True)", required=False, default=""),
+    ],
+    handler=_handle_scale_object,
+)
+
+
+# ── section_object ────────────────────────────────────────
+
+def _handle_section_object(
+    object_name: str,
+    tool_object: str = "",
+    plane: str = "XY",
+    offset: float = 0.0,
+    label: str = "",
+) -> ToolResult:
+    """Create a cross-section of an object."""
+    import FreeCAD as App
+    import Part
+
+    def do(doc):
+        obj = _get_object(doc, object_name)
+        if not obj:
+            return ToolResult(success=False, output="", error=f"Object '{object_name}' not found")
+
+        if tool_object:
+            # Shape-vs-shape section
+            tool = _get_object(doc, tool_object)
+            if not tool:
+                return ToolResult(success=False, output="", error=f"Tool object '{tool_object}' not found")
+            name = label or "Section"
+            sec = doc.addObject("Part::Section", name)
+            sec.Base = obj
+            sec.Tool = tool
+            return ToolResult(
+                success=True,
+                output=f"Created section of '{obj.Label}' with '{tool.Label}'",
+                data={"name": sec.Name, "label": sec.Label},
+            )
+
+        # Shape-vs-plane section
+        bb = obj.Shape.BoundBox
+        size = max(bb.XLength, bb.YLength, bb.ZLength) * 2 + 10
+
+        plane_upper = plane.upper()
+        if plane_upper == "XY":
+            origin = App.Vector(bb.XMin - 5, bb.YMin - 5, offset)
+            normal = App.Vector(0, 0, 1)
+        elif plane_upper == "XZ":
+            origin = App.Vector(bb.XMin - 5, offset, bb.ZMin - 5)
+            normal = App.Vector(0, 1, 0)
+        elif plane_upper == "YZ":
+            origin = App.Vector(offset, bb.YMin - 5, bb.ZMin - 5)
+            normal = App.Vector(1, 0, 0)
+        else:
+            return ToolResult(success=False, output="", error=f"Unknown plane: {plane}. Use XY, XZ, or YZ")
+
+        cut_plane = Part.makePlane(size, size, origin, normal)
+        section_shape = obj.Shape.section(cut_plane)
+
+        name = label or "Section"
+        sec_obj = doc.addObject("Part::Feature", name)
+        sec_obj.Label = name
+        sec_obj.Shape = section_shape
+
+        edge_count = len(section_shape.Edges)
+        return ToolResult(
+            success=True,
+            output=f"Created {plane_upper} section of '{obj.Label}' at offset={offset}mm ({edge_count} edges)",
+            data={"name": sec_obj.Name, "label": sec_obj.Label, "edge_count": edge_count,
+                  "bbox": {"xmin": section_shape.BoundBox.XMin, "xmax": section_shape.BoundBox.XMax,
+                           "ymin": section_shape.BoundBox.YMin, "ymax": section_shape.BoundBox.YMax,
+                           "zmin": section_shape.BoundBox.ZMin, "zmax": section_shape.BoundBox.ZMax}},
+        )
+
+    return _with_undo("Section Object", do)
+
+
+SECTION_OBJECT = ToolDefinition(
+    name="section_object",
+    description="Create a cross-section: either cut an object with a plane (XY/XZ/YZ at a given offset) or intersect two shapes.",
+    category="modeling",
+    parameters=[
+        ToolParam("object_name", "string", "Internal name of the object to section"),
+        ToolParam("tool_object", "string", "Second object for shape-vs-shape section (omit for plane section)", required=False, default=""),
+        ToolParam("plane", "string", "Section plane (used when tool_object is omitted)", required=False, default="XY",
+                  enum=["XY", "XZ", "YZ"]),
+        ToolParam("offset", "number", "Offset along the plane normal (e.g. z-height for XY plane)", required=False, default=0.0),
+        ToolParam("label", "string", "Display label for the section", required=False, default=""),
+    ],
+    handler=_handle_section_object,
+)
+
+
+# ── linear_pattern ────────────────────────────────────────
+
+def _handle_linear_pattern(
+    feature_name: str,
+    direction: str = "X",
+    length: float = 10.0,
+    occurrences: int = 2,
+    label: str = "",
+) -> ToolResult:
+    """Create a PartDesign::LinearPattern repeating a feature along an axis."""
+
+    def do(doc):
+        feature = _get_object(doc, feature_name)
+        if not feature:
+            return ToolResult(success=False, output="", error=f"Feature '{feature_name}' not found")
+
+        body = _find_body_for(doc, feature)
+        if not body:
+            return ToolResult(
+                success=False, output="",
+                error=f"Feature '{feature_name}' is not inside a PartDesign body. Linear pattern requires a body."
+            )
+
+        name = label or "LinearPattern"
+        pattern = body.newObject("PartDesign::LinearPattern", name)
+        pattern.Originals = [feature]
+
+        # Resolve direction
+        dir_upper = direction.upper()
+        if dir_upper in ("X", "Y", "Z"):
+            axis = _get_body_axis(body, dir_upper)
+            if not axis:
+                return ToolResult(success=False, output="", error=f"Could not find {dir_upper} axis on body")
+            pattern.Direction = (axis, [""])
+        else:
+            # Sketch edge reference like "Sketch.Edge1"
+            parts = direction.split(".")
+            if len(parts) == 2:
+                ref_obj = _get_object(doc, parts[0])
+                if ref_obj:
+                    pattern.Direction = (ref_obj, [parts[1]])
+                else:
+                    return ToolResult(success=False, output="", error=f"Reference object '{parts[0]}' not found")
+            else:
+                return ToolResult(success=False, output="", error=f"Invalid direction: {direction}. Use X/Y/Z or Sketch.Edge1")
+
+        pattern.Length = length
+        pattern.Occurrences = occurrences
+
+        return ToolResult(
+            success=True,
+            output=f"Created linear pattern of '{feature_name}' ({occurrences} occurrences, {length}mm span, direction={direction})",
+            data={"name": pattern.Name, "label": pattern.Label, "occurrences": occurrences},
+        )
+
+    return _with_undo("Linear Pattern", do)
+
+
+LINEAR_PATTERN = ToolDefinition(
+    name="linear_pattern",
+    description="Repeat a PartDesign feature in a linear pattern along an axis. The feature must be inside a PartDesign Body.",
+    category="modeling",
+    parameters=[
+        ToolParam("feature_name", "string", "Internal name of the feature to repeat"),
+        ToolParam("direction", "string", "Pattern direction: X, Y, Z (origin axes) or Sketch.Edge1 (sketch edge)", required=False, default="X"),
+        ToolParam("length", "number", "Total span of the pattern in mm"),
+        ToolParam("occurrences", "integer", "Number of occurrences (including the original)"),
+        ToolParam("label", "string", "Display label for the pattern", required=False, default=""),
+    ],
+    handler=_handle_linear_pattern,
+)
+
+
+# ── polar_pattern ─────────────────────────────────────────
+
+def _handle_polar_pattern(
+    feature_name: str,
+    axis: str = "Z",
+    angle: float = 360.0,
+    occurrences: int = 2,
+    label: str = "",
+) -> ToolResult:
+    """Create a PartDesign::PolarPattern repeating a feature around an axis."""
+
+    def do(doc):
+        feature = _get_object(doc, feature_name)
+        if not feature:
+            return ToolResult(success=False, output="", error=f"Feature '{feature_name}' not found")
+
+        body = _find_body_for(doc, feature)
+        if not body:
+            return ToolResult(
+                success=False, output="",
+                error=f"Feature '{feature_name}' is not inside a PartDesign body. Polar pattern requires a body."
+            )
+
+        name = label or "PolarPattern"
+        pattern = body.newObject("PartDesign::PolarPattern", name)
+        pattern.Originals = [feature]
+
+        # Resolve axis
+        axis_upper = axis.upper()
+        if axis_upper in ("X", "Y", "Z"):
+            axis_obj = _get_body_axis(body, axis_upper)
+            if not axis_obj:
+                return ToolResult(success=False, output="", error=f"Could not find {axis_upper} axis on body")
+            pattern.Axis = (axis_obj, [""])
+        else:
+            parts = axis.split(".")
+            if len(parts) == 2:
+                ref_obj = _get_object(doc, parts[0])
+                if ref_obj:
+                    pattern.Axis = (ref_obj, [parts[1]])
+                else:
+                    return ToolResult(success=False, output="", error=f"Reference object '{parts[0]}' not found")
+            else:
+                return ToolResult(success=False, output="", error=f"Invalid axis: {axis}. Use X/Y/Z or Sketch.Edge1")
+
+        pattern.Angle = angle
+        pattern.Occurrences = occurrences
+
+        return ToolResult(
+            success=True,
+            output=f"Created polar pattern of '{feature_name}' ({occurrences} occurrences, {angle}° span, axis={axis})",
+            data={"name": pattern.Name, "label": pattern.Label, "occurrences": occurrences},
+        )
+
+    return _with_undo("Polar Pattern", do)
+
+
+POLAR_PATTERN = ToolDefinition(
+    name="polar_pattern",
+    description="Repeat a PartDesign feature in a circular pattern around an axis. The feature must be inside a PartDesign Body.",
+    category="modeling",
+    parameters=[
+        ToolParam("feature_name", "string", "Internal name of the feature to repeat"),
+        ToolParam("axis", "string", "Rotation axis: X, Y, Z (origin axes) or Sketch.Edge1 (sketch edge)", required=False, default="Z"),
+        ToolParam("angle", "number", "Total angular span in degrees (360 = full circle)", required=False, default=360.0),
+        ToolParam("occurrences", "integer", "Number of occurrences (including the original)"),
+        ToolParam("label", "string", "Display label for the pattern", required=False, default=""),
+    ],
+    handler=_handle_polar_pattern,
+)
+
+
+# ── shell_object ───────────────────────────────────────────
+
+def _handle_shell_object(
+    object_name: str,
+    faces: list | None = None,
+    thickness: float = 1.0,
+    join: str = "Arc",
+    reversed: bool = False,
+    label: str = "",
+) -> ToolResult:
+    """Hollow out a solid by removing faces and applying wall thickness."""
+
+    def do(doc):
+        obj = _get_object(doc, object_name)
+        if not obj:
+            return ToolResult(success=False, output="", error=f"Object '{object_name}' not found")
+
+        face_refs = faces or ["Face1"]
+        join_map = {"Arc": 0, "Intersection": 1}
+
+        body = _find_body_for(doc, obj)
+        if body:
+            shell = body.newObject("PartDesign::Thickness", label or "Shell")
+            shell.Base = (obj, face_refs)
+            shell.Value = thickness
+            shell.Join = join_map.get(join, 0)
+            shell.Reversed = reversed
+        else:
+            shell = doc.addObject("Part::Offset3D", label or "Shell")
+            shell.Source = obj
+            shell.Value = -thickness
+            shell.Join = join_map.get(join, 0)
+
+        return ToolResult(
+            success=True,
+            output=f"Applied shell (thickness={thickness}mm) to '{obj.Label}' removing {len(face_refs)} face(s)",
+            data={"name": shell.Name, "label": shell.Label, "thickness": thickness},
+        )
+
+    return _with_undo("Shell Object", do)
+
+
+SHELL_OBJECT = ToolDefinition(
+    name="shell_object",
+    description="Hollow out a solid by removing selected faces and applying a wall thickness (PartDesign::Thickness).",
+    category="modeling",
+    parameters=[
+        ToolParam("object_name", "string", "Internal name of the solid object to shell"),
+        ToolParam("faces", "array", "Face references to remove, e.g. ['Face1', 'Face6']", required=False,
+                  items={"type": "string"}),
+        ToolParam("thickness", "number", "Wall thickness in mm", required=False, default=1.0),
+        ToolParam("join", "string", "Join type for corners", required=False, default="Arc",
+                  enum=["Arc", "Intersection"]),
+        ToolParam("reversed", "boolean", "Reverse shell direction (outward instead of inward)", required=False, default=False),
+        ToolParam("label", "string", "Display label for the shell feature", required=False, default=""),
+    ],
+    handler=_handle_shell_object,
+)
+
+
+# ── Interactive selection ─────────────────────────────────────
+
+def _handle_select_geometry(prompt="Select geometry", select_type="any", max_count=0):
+    """Open an interactive selection panel and wait for user picks."""
+    from freecad_ai.ui.selection_panel import SelectionPanel
+
+    panel = SelectionPanel(prompt=prompt, select_type=select_type, max_count=max_count)
+    selections = panel.exec()
+
+    if not selections:
+        return ToolResult(
+            success=True,
+            output="User cancelled selection or selected nothing.",
+            data={"selections": []},
+        )
+
+    lines = [
+        f"- {s['object']}.{s['sub_element']} at "
+        f"({s['point'][0]:.2f}, {s['point'][1]:.2f}, {s['point'][2]:.2f})"
+        for s in selections
+    ]
+    return ToolResult(
+        success=True,
+        output="Selected:\n" + "\n".join(lines),
+        data={"selections": selections},
+    )
+
+
+SELECT_GEOMETRY = ToolDefinition(
+    name="select_geometry",
+    description=(
+        "Ask the user to select geometry (edges, faces, vertices) in the 3D viewport. "
+        "Opens an interactive selection panel and waits for the user to click on "
+        "geometry and press Done."
+    ),
+    category="interactive",
+    parameters=[
+        ToolParam("prompt", "string",
+                  "Instruction shown to the user, e.g. 'Select edges to fillet'",
+                  required=False, default="Select geometry"),
+        ToolParam("select_type", "string",
+                  "Type of geometry to accept",
+                  required=False, default="any",
+                  enum=["any", "edge", "face", "vertex"]),
+        ToolParam("max_count", "integer",
+                  "Max selections (0=unlimited)",
+                  required=False, default=0),
+    ],
+    handler=_handle_select_geometry,
+)
+
+
+# ── capture_viewport ───────────────────────────────────────
+
+def _handle_capture_viewport(
+    filepath: str,
+    width: int = 800,
+    height: int = 600,
+    background: str = "Current",
+) -> ToolResult:
+    """Save a screenshot of the 3D viewport to a file."""
+    import FreeCADGui as Gui
+
+    if not Gui.ActiveDocument:
+        return ToolResult(success=False, output="", error="No active document")
+
+    view = Gui.ActiveDocument.ActiveView
+    try:
+        view.saveImage(filepath, width, height, background)
+    except Exception as e:
+        return ToolResult(success=False, output="", error=f"Screenshot failed: {e}")
+
+    return ToolResult(
+        success=True,
+        output=f"Screenshot saved to {filepath} ({width}x{height}, background={background})",
+        data={"filepath": filepath, "width": width, "height": height},
+    )
+
+
+CAPTURE_VIEWPORT = ToolDefinition(
+    name="capture_viewport",
+    description="Save a screenshot of the 3D viewport to a file.",
+    category="view",
+    parameters=[
+        ToolParam("filepath", "string", "Output file path (e.g. /tmp/screenshot.png)"),
+        ToolParam("width", "integer", "Image width in pixels",
+                  required=False, default=800),
+        ToolParam("height", "integer", "Image height in pixels",
+                  required=False, default=600),
+        ToolParam("background", "string",
+                  "Background color for the screenshot",
+                  required=False, default="Current",
+                  enum=["Current", "White", "Black", "Transparent"]),
+    ],
+    handler=_handle_capture_viewport,
+)
+
+
+# ── set_view ───────────────────────────────────────────────
+
+def _handle_set_view(
+    orientation: str,
+    fit_all: bool = True,
+    projection: str = "",
+) -> ToolResult:
+    """Set the camera to a standard view orientation."""
+    import FreeCADGui as Gui
+
+    if not Gui.ActiveDocument:
+        return ToolResult(success=False, output="", error="No active document")
+
+    view = Gui.ActiveDocument.ActiveView
+
+    view_methods = {
+        "isometric": "viewIsometric",
+        "front": "viewFront",
+        "back": "viewRear",
+        "top": "viewTop",
+        "bottom": "viewBottom",
+        "left": "viewLeft",
+        "right": "viewRight",
+    }
+    method_name = view_methods.get(orientation.lower())
+    if not method_name:
+        return ToolResult(
+            success=False, output="",
+            error=f"Unknown orientation: {orientation}. "
+                  f"Use: {', '.join(view_methods.keys())}"
+        )
+
+    try:
+        getattr(view, method_name)()
+
+        if fit_all:
+            Gui.SendMsgToActiveView("ViewFit")
+
+        if projection:
+            view.setCameraType(projection)
+    except Exception as e:
+        return ToolResult(success=False, output="", error=f"Set view failed: {e}")
+
+    parts = [f"Set view to {orientation}"]
+    if fit_all:
+        parts.append("fit all")
+    if projection:
+        parts.append(f"projection={projection}")
+    return ToolResult(
+        success=True,
+        output=", ".join(parts),
+        data={"orientation": orientation, "fit_all": fit_all, "projection": projection},
+    )
+
+
+SET_VIEW = ToolDefinition(
+    name="set_view",
+    description=(
+        "Set the camera to a standard view orientation (front, top, isometric, etc.) "
+        "and optionally adjust zoom and projection mode."
+    ),
+    category="view",
+    parameters=[
+        ToolParam("orientation", "string", "Camera orientation",
+                  enum=["isometric", "front", "back", "top", "bottom", "left", "right"]),
+        ToolParam("fit_all", "boolean", "Zoom to fit all objects in view",
+                  required=False, default=True),
+        ToolParam("projection", "string", "Projection mode",
+                  required=False, default="",
+                  enum=["Orthographic", "Perspective"]),
+    ],
+    handler=_handle_set_view,
+)
+
+
+# ── zoom_object ────────────────────────────────────────────
+
+def _handle_zoom_object(object_name: str) -> ToolResult:
+    """Zoom the viewport to focus on a specific object."""
+    import FreeCAD as App
+    import FreeCADGui as Gui
+
+    doc = App.ActiveDocument
+    if not doc:
+        return ToolResult(success=False, output="", error="No active document")
+
+    obj = _get_object(doc, object_name)
+    if not obj:
+        return ToolResult(
+            success=False, output="",
+            error=f"Object '{object_name}' not found"
+        )
+
+    try:
+        Gui.Selection.clearSelection()
+        Gui.Selection.addSelection(obj)
+        Gui.SendMsgToActiveView("ViewSelection")
+        Gui.Selection.clearSelection()
+    except Exception as e:
+        return ToolResult(success=False, output="", error=f"Zoom failed: {e}")
+
+    return ToolResult(
+        success=True,
+        output=f"Zoomed to object '{obj.Label}'",
+        data={"object_name": obj.Name, "label": obj.Label},
+    )
+
+
+ZOOM_OBJECT = ToolDefinition(
+    name="zoom_object",
+    description="Zoom the viewport to focus on a specific object.",
+    category="view",
+    parameters=[
+        ToolParam("object_name", "string", "Name or label of the object to zoom to"),
+    ],
+    handler=_handle_zoom_object,
+)
+
+
 # ── Helpers ─────────────────────────────────────────────────
 
 def _get_object(doc, name_or_label):
@@ -1671,10 +2323,20 @@ ALL_TOOLS = [
     CREATE_INNER_RIDGE,
     CREATE_SNAP_TABS,
     CREATE_ENCLOSURE_LID,
+    CREATE_WEDGE,
+    SCALE_OBJECT,
+    SECTION_OBJECT,
+    LINEAR_PATTERN,
+    POLAR_PATTERN,
+    SHELL_OBJECT,
     MEASURE,
     GET_DOCUMENT_STATE,
     MODIFY_PROPERTY,
     EXPORT_MODEL,
     EXECUTE_CODE,
     UNDO,
+    CAPTURE_VIEWPORT,
+    SET_VIEW,
+    ZOOM_OBJECT,
+    SELECT_GEOMETRY,
 ]
