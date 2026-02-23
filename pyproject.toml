@@ -1,0 +1,10 @@
+[project]
+name = "freecad-ai"
+version = "0.1.0"
+description = "AI assistant workbench for FreeCAD"
+requires-python = ">=3.11"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = ["integration: FreeCAD integration tests (require AppImage)"]
+addopts = "-m 'not integration'"

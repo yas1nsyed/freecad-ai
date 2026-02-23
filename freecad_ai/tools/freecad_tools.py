@@ -393,7 +393,7 @@ def _handle_pad_sketch(
         pad.Profile = sketch
         pad.Length = length
         if symmetric:
-            pad.Symmetric = True
+            pad.Midplane = True
         sketch.Visibility = False
 
         return ToolResult(
