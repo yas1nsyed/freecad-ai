@@ -2139,7 +2139,7 @@ def _handle_shell_object(
     faces: list | None = None,
     thickness: float = 1.0,
     join: str = "Arc",
-    reversed: bool = False,
+    reversed: bool = True,
     label: str = "",
 ) -> ToolResult:
     """Hollow out a solid by removing faces and applying wall thickness."""
@@ -2187,7 +2187,7 @@ SHELL_OBJECT = ToolDefinition(
         ToolParam("thickness", "number", "Wall thickness in mm", required=False, default=1.0),
         ToolParam("join", "string", "Join type for corners", required=False, default="Arc",
                   enum=["Arc", "Intersection"]),
-        ToolParam("reversed", "boolean", "Reverse shell direction (outward instead of inward)", required=False, default=False),
+        ToolParam("reversed", "boolean", "Shell direction: True (default) = inward (preserves outer dimensions), False = outward", required=False, default=True),
         ToolParam("label", "string", "Display label for the shell feature", required=False, default=""),
     ],
     handler=_handle_shell_object,
