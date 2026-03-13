@@ -313,8 +313,20 @@ class _ImageAwareTextEdit(QTextEdit):
 
     image_added = Signal(str, str)  # (media_type, base64_data)
 
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._images_enabled = True
+
+    def set_images_enabled(self, enabled: bool):
+        """Enable or disable image paste and drag-drop."""
+        self._images_enabled = enabled
+        self.setAcceptDrops(enabled)
+
     def insertFromMimeData(self, source):
         """Handle paste — extract image if present."""
+        if not self._images_enabled:
+            super().insertFromMimeData(source)
+            return
         if source.hasImage():
             self._process_image_from_mime(source)
         elif source.hasUrls():
@@ -349,6 +361,8 @@ class _ImageAwareTextEdit(QTextEdit):
 
     def _process_image_from_mime(self, source):
         """Extract QImage from mime data, resize, and emit."""
+        if not self._images_enabled:
+            return
         img = source.imageData()
         if img is None or img.isNull():
             return
@@ -365,6 +379,8 @@ class _ImageAwareTextEdit(QTextEdit):
 
     def _process_image_file(self, path: str):
         """Read an image file, resize, and emit."""
+        if not self._images_enabled:
+            return
         from ..utils.viewport import resize_image_bytes, image_to_base64_png, RESOLUTION_PRESETS
         from ..config import get_config
         try:
@@ -477,8 +493,11 @@ class ChatDockWidget(QDockWidget):
         self._capture_mode_override = None  # Session-only viewport capture override
         self._pending_viewport_image = None  # Viewport image queued by after_changes mode
         self._mcp_connected = False
+        self._vision_fallback_tool = None   # runtime-only, found after MCP connect
+        self._vision_hint_shown = False      # one-time hint for untested state
 
         self._build_ui()
+        self._refresh_image_controls()
 
     def _build_ui(self):
         container = QWidget()
@@ -630,8 +649,19 @@ class ChatDockWidget(QDockWidget):
             if handled:
                 return
 
+        # Show one-time hint if vision not tested and user is sending images
+        pending_images = self._attachment_strip.get_images()
+        cfg = get_config()
+        if pending_images and cfg.vision_detected is None and not self._vision_hint_shown:
+            self._vision_hint_shown = True
+            self._append_html(
+                '<div style="color: #888; font-size: 9pt; margin: 4px 12px;">'
+                'Tip: click Test Connection in Settings to enable vision auto-detection.'
+                '</div>'
+            )
+
         # Collect attached images
-        images = self._attachment_strip.get_images() or None
+        images = pending_images or None
 
         # Auto-capture viewport if configured
         capture_mode = getattr(self, "_capture_mode_override", None) or get_config().viewport_capture
@@ -718,9 +748,37 @@ class ChatDockWidget(QDockWidget):
         cfg.mode = "plan" if index == 0 else "act"
         save_current_config()
 
+    def _refresh_image_controls(self):
+        """Enable/disable image controls based on vision capability."""
+        cfg = get_config()
+        # Disable only when we know there's no vision AND no fallback
+        disable = (cfg.vision_detected is not None
+                   and not cfg.supports_vision
+                   and self._vision_fallback_tool is None)
+
+        no_vision_tip = translate(
+            "ChatDockWidget",
+            "No vision support \u2014 configure a vision MCP server or enable in Settings"
+        )
+
+        self._capture_btn.setEnabled(not disable)
+        self._attach_btn.setEnabled(not disable)
+        self.input_edit.set_images_enabled(not disable)
+
+        if disable:
+            self._capture_btn.setToolTip(no_vision_tip)
+            self._attach_btn.setToolTip(no_vision_tip)
+        else:
+            self._capture_btn.setToolTip(translate("ChatDockWidget", "Viewport capture: off"))
+            self._attach_btn.setToolTip(translate("ChatDockWidget", "Attach an image file"))
+
     def _open_settings(self):
         """Open the settings dialog."""
         from .settings_dialog import SettingsDialog
+        cfg = get_config()
+        old_provider = cfg.provider.name
+        old_model = cfg.provider.model
+        old_mcp = list(cfg.mcp_servers)
         try:
             import FreeCADGui as Gui
             parent = Gui.getMainWindow()
@@ -728,6 +786,17 @@ class ChatDockWidget(QDockWidget):
             parent = self
         dlg = SettingsDialog(parent)
         dlg.exec()
+        # Refresh after settings may have changed
+        cfg = get_config()
+        if cfg.provider.name != old_provider or cfg.provider.model != old_model:
+            self._vision_fallback_tool = None
+        if cfg.mcp_servers != old_mcp:
+            self._vision_fallback_tool = None
+        # If vision not supported and MCP already connected, search now
+        if not cfg.supports_vision and self._vision_fallback_tool is None and self._tool_registry:
+            from ..mcp.manager import find_vision_fallback
+            self._vision_fallback_tool = find_vision_fallback(self._tool_registry)
+        self._refresh_image_controls()
 
     def _new_chat(self):
         """Start a new conversation."""
@@ -889,6 +958,11 @@ class ChatDockWidget(QDockWidget):
             from ..tools.setup import create_default_registry
             from ..llm.providers import get_api_style
             self._tool_registry = create_default_registry()
+            # Search for vision fallback after registry (with MCP tools) is created
+            if not cfg.supports_vision and self._vision_fallback_tool is None:
+                from ..mcp.manager import find_vision_fallback
+                self._vision_fallback_tool = find_vision_fallback(self._tool_registry)
+                self._refresh_image_controls()
             api_style = get_api_style(cfg.provider.name)
             if api_style == "anthropic":
                 tools_schema = self._tool_registry.to_anthropic_schema()
