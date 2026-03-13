@@ -176,6 +176,36 @@ class SettingsDialog(QDialog):
         resolution_layout.addStretch()
         behavior_layout.addLayout(resolution_layout)
 
+        # Vision support
+        vision_layout = QHBoxLayout()
+        self.vision_check = QCheckBox(
+            translate("SettingsDialog", "Model supports vision")
+        )
+        self.vision_check.setToolTip(
+            translate("SettingsDialog",
+                      "When enabled, images are sent directly to the LLM.\n"
+                      "When disabled, images are described via MCP before sending.\n"
+                      "Use Test Connection to auto-detect.")
+        )
+        self.vision_check.stateChanged.connect(self._on_vision_override_changed)
+        vision_layout.addWidget(self.vision_check)
+
+        self._vision_status_label = QLabel()
+        self._vision_status_label.setStyleSheet("color: #888;")
+        vision_layout.addWidget(self._vision_status_label)
+
+        self._vision_reset_btn = QPushButton(translate("SettingsDialog", "Reset"))
+        self._vision_reset_btn.setMaximumWidth(50)
+        self._vision_reset_btn.setToolTip(
+            translate("SettingsDialog", "Clear manual override, use auto-detected value")
+        )
+        self._vision_reset_btn.clicked.connect(self._reset_vision_override)
+        self._vision_reset_btn.hide()
+        vision_layout.addWidget(self._vision_reset_btn)
+
+        vision_layout.addStretch()
+        behavior_layout.addLayout(vision_layout)
+
         behavior_group.setLayout(behavior_layout)
         layout.addWidget(behavior_group)
 
@@ -290,6 +320,11 @@ class SettingsDialog(QDialog):
         resolution_map = {"low": 0, "medium": 1, "high": 2}
         self.viewport_resolution_combo.setCurrentIndex(resolution_map.get(cfg.viewport_resolution, 1))
 
+        # Vision
+        self._original_provider = cfg.provider.name
+        self._original_model = cfg.provider.model
+        self._update_vision_ui(cfg)
+
         # MCP servers
         self.mcp_list.clear()
         self._mcp_configs = list(cfg.mcp_servers)
@@ -336,6 +371,14 @@ class SettingsDialog(QDialog):
 
         resolution_values = ["low", "medium", "high"]
         cfg.viewport_resolution = resolution_values[self.viewport_resolution_combo.currentIndex()]
+
+        # Vision override
+        if hasattr(self, '_vision_override_value'):
+            cfg.vision_override = self._vision_override_value
+        # Reset vision_detected if provider or model changed
+        if (hasattr(self, '_original_provider') and cfg.provider.name != self._original_provider) or \
+           (hasattr(self, '_original_model') and cfg.provider.model != self._original_model):
+            cfg.vision_detected = None
 
         cfg.mcp_servers = list(self._mcp_configs) if hasattr(self, "_mcp_configs") else []
         cfg.scan_freecad_macros = self.scan_macros_cb.isChecked()
@@ -499,6 +542,48 @@ class SettingsDialog(QDialog):
     def _reload_user_tools(self):
         """Re-scan and refresh the user tools list."""
         self._load_user_tools_list()
+
+    def _update_vision_ui(self, cfg):
+        """Update vision checkbox and label from config state."""
+        self._vision_override_value = cfg.vision_override
+        # Temporarily disconnect to avoid triggering _on_vision_override_changed
+        self.vision_check.stateChanged.disconnect(self._on_vision_override_changed)
+        if cfg.vision_override is not None:
+            self.vision_check.setChecked(cfg.vision_override)
+            self._vision_status_label.setText(
+                translate("SettingsDialog", "(manual override)")
+            )
+            self._vision_reset_btn.show()
+        elif cfg.vision_detected is not None:
+            self.vision_check.setChecked(cfg.vision_detected)
+            self._vision_status_label.setText(
+                translate("SettingsDialog", "(auto-detected)")
+            )
+            self._vision_reset_btn.hide()
+        else:
+            self.vision_check.setChecked(False)
+            self._vision_status_label.setText(
+                translate("SettingsDialog", "(not tested)")
+            )
+            self._vision_reset_btn.hide()
+        self.vision_check.stateChanged.connect(self._on_vision_override_changed)
+
+    def _on_vision_override_changed(self, state):
+        """User toggled the vision checkbox — set manual override.
+
+        PySide2 QCheckBox.stateChanged emits int (0=Unchecked, 2=Checked).
+        """
+        self._vision_override_value = (state != 0)
+        self._vision_status_label.setText(
+            translate("SettingsDialog", "(manual override)")
+        )
+        self._vision_reset_btn.show()
+
+    def _reset_vision_override(self):
+        """Clear the manual override, revert to auto-detected value."""
+        cfg = get_config()
+        self._vision_override_value = None
+        self._update_vision_ui(cfg)
 
 
 class _AddMCPServerDialog(QDialog):
