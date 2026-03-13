@@ -1,7 +1,7 @@
 # Vision Routing — Design Spec
 
 **Date**: 2026-03-13
-**Status**: Approved
+**Status**: Implemented
 
 ## Overview
 
