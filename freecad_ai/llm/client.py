@@ -7,7 +7,9 @@ Supports two API styles:
 Both streaming and non-streaming modes are supported, with optional tool calling.
 """
 
+import base64
 import json
+import random
 import ssl
 import urllib.request
 import urllib.error
@@ -48,6 +50,65 @@ class LLMStreamEvent:
 class LLMError(Exception):
     """Error communicating with the LLM provider."""
     pass
+
+
+def _generate_probe_image() -> tuple[int, bytes]:
+    """Generate a small PNG with a random 3-digit number for vision probing.
+
+    Returns (number, png_bytes).
+    Uses QPainter if available, falls back to a minimal manual PNG.
+    """
+    number = random.randint(100, 999)
+    try:
+        from PySide2.QtGui import QImage, QPainter, QFont, QColor
+        from PySide2.QtCore import Qt
+        from PySide2 import QtCore as _QtCore
+        # Require a running QCoreApplication — if none exists Qt may crash
+        if _QtCore.QCoreApplication.instance() is None:
+            raise RuntimeError("No QApplication")
+
+        img = QImage(64, 32, QImage.Format_RGB32)
+        img.fill(QColor(255, 255, 255))
+        painter = QPainter(img)
+        painter.setPen(QColor(0, 0, 0))
+        font = QFont("Sans", 16)
+        font.setBold(True)
+        painter.setFont(font)
+        painter.drawText(img.rect(), Qt.AlignCenter, str(number))
+        painter.end()
+
+        buf = _QtCore.QBuffer()
+        buf.open(_QtCore.QBuffer.WriteOnly)
+        img.save(buf, "PNG")
+        png_bytes = bytes(buf.data())
+        buf.close()
+        return number, png_bytes
+    except (ImportError, RuntimeError):
+        # Fallback: create minimal 1x1 white PNG (for unit tests without Qt)
+        import struct
+        import zlib
+
+        def _minimal_png() -> bytes:
+            signature = b'\x89PNG\r\n\x1a\n'
+            # IHDR
+            ihdr_data = struct.pack('>IIBBBBB', 1, 1, 8, 2, 0, 0, 0)
+            ihdr_crc = zlib.crc32(b'IHDR' + ihdr_data) & 0xFFFFFFFF
+            ihdr = struct.pack('>I', 13) + b'IHDR' + ihdr_data + struct.pack('>I', ihdr_crc)
+            # IDAT
+            raw = zlib.compress(b'\x00\xff\xff\xff')
+            idat_crc = zlib.crc32(b'IDAT' + raw) & 0xFFFFFFFF
+            idat = struct.pack('>I', len(raw)) + b'IDAT' + raw + struct.pack('>I', idat_crc)
+            # IEND
+            iend_crc = zlib.crc32(b'IEND') & 0xFFFFFFFF
+            iend = struct.pack('>I', 0) + b'IEND' + struct.pack('>I', iend_crc)
+            return signature + ihdr + idat + iend
+
+        return number, _minimal_png()
+
+
+def _check_probe_response(response: str, expected_number: int) -> bool:
+    """Check if the LLM response contains the expected number."""
+    return str(expected_number) in response
 
 
 class LLMClient:

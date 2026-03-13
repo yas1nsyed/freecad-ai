@@ -46,3 +46,39 @@ class TestVisionConfig:
         cfg2 = AppConfig.from_dict(d)
         assert cfg2.vision_detected is None
         assert cfg2.vision_override is None
+
+
+class TestVisionProbe:
+    """Vision probe image generation and response parsing."""
+
+    def test_generate_probe_image_returns_png_bytes(self):
+        from freecad_ai.llm.client import _generate_probe_image
+        number, png_bytes = _generate_probe_image()
+        assert 100 <= number <= 999
+        assert png_bytes[:8] == b'\x89PNG\r\n\x1a\n'  # PNG magic bytes
+        assert len(png_bytes) > 50  # non-trivial content
+
+    def test_generate_probe_image_random(self):
+        from freecad_ai.llm.client import _generate_probe_image
+        numbers = {_generate_probe_image()[0] for _ in range(20)}
+        assert len(numbers) > 1  # not always the same number
+
+    def test_check_probe_response_exact_match(self):
+        from freecad_ai.llm.client import _check_probe_response
+        assert _check_probe_response("427", 427) is True
+
+    def test_check_probe_response_in_sentence(self):
+        from freecad_ai.llm.client import _check_probe_response
+        assert _check_probe_response("The number shown is 427.", 427) is True
+
+    def test_check_probe_response_wrong_number(self):
+        from freecad_ai.llm.client import _check_probe_response
+        assert _check_probe_response("The number is 123.", 427) is False
+
+    def test_check_probe_response_no_number(self):
+        from freecad_ai.llm.client import _check_probe_response
+        assert _check_probe_response("I cannot see any image.", 427) is False
+
+    def test_check_probe_response_empty(self):
+        from freecad_ai.llm.client import _check_probe_response
+        assert _check_probe_response("", 427) is False
