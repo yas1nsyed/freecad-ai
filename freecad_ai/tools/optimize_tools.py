@@ -272,3 +272,47 @@ def get_optimize_iteration_tool() -> ToolDefinition:
         handler=_handle_optimize_iteration,
         category="optimization",
     )
+
+
+# ── Internal eval tools (document management, not exposed to LLM) ─────
+
+def _handle_eval_create_doc(name: str) -> ToolResult:
+    """Create a fresh FreeCAD document for evaluation."""
+    import FreeCAD as App
+    doc = App.newDocument(name)
+    App.setActiveDocument(name)
+    return ToolResult(success=True, output=f"Created document: {doc.Name}")
+
+
+def _handle_eval_close_doc(name: str) -> ToolResult:
+    """Close an evaluation document."""
+    import FreeCAD as App
+    docs = App.listDocuments()
+    if name in [d.Name for d in docs.values()]:
+        App.closeDocument(name)
+        return ToolResult(success=True, output=f"Closed document: {name}")
+    return ToolResult(success=True, output=f"Document {name} not found (already closed)")
+
+
+def get_eval_tools() -> list[ToolDefinition]:
+    """Return internal tools for evaluation document management.
+
+    These are registered in the evaluator's registry but NOT exposed to the
+    LLM (they have no schema in the tools list sent to the LLM).
+    """
+    return [
+        ToolDefinition(
+            name="_eval_create_doc",
+            description="(internal) Create evaluation document",
+            parameters=[ToolParam("name", "string", "Document name")],
+            handler=_handle_eval_create_doc,
+            category="_internal",
+        ),
+        ToolDefinition(
+            name="_eval_close_doc",
+            description="(internal) Close evaluation document",
+            parameters=[ToolParam("name", "string", "Document name")],
+            handler=_handle_eval_close_doc,
+            category="_internal",
+        ),
+    ]
