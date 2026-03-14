@@ -100,14 +100,20 @@ modified SKILL.md between ```skill markers. Focus on fixing the specific errors 
 # ── Prompt template for inject_prompt ────────────────────────────────────
 
 OPTIMIZATION_PROMPT_TEMPLATE = """\
-# Skill Optimization Task
+Call the `optimize_iteration` tool NOW with these exact parameters:
+- skill_name: "{skill_name}"
+- skill_content: the complete SKILL.md shown below
+- test_cases: {test_cases_json}
 
-Optimizing skill **{skill_name}** with {iterations} iterations.
+The tool runs all {iterations} iterations automatically and returns results.
 
-Test cases: {test_cases_formatted}
+## SKILL.md content to pass as skill_content:
 
-The `optimize_iteration` tool will run the full optimization loop automatically. \
-Call it once — it handles all iterations internally.
+```
+{current_skill_md}
+```
+
+Do NOT try to read files. Do NOT call any other tool. Call `optimize_iteration` with the content above.
 """
 
 

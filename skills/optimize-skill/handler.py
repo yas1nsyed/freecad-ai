@@ -84,16 +84,14 @@ def execute(args: str) -> dict:
     # Start optimization session
     start_optimization(state, config)
 
-    # Build test cases display
-    tc_lines = []
-    for i, tc in enumerate(config["test_cases"], 1):
-        tc_lines.append(f"{i}. `{tc.get('args', '')}`")
-    test_cases_formatted = "\n".join(tc_lines)
-
     # Build inject prompt
+    import json as _json
+    test_cases_json = _json.dumps([tc.get("args", "") for tc in config["test_cases"]])
+
     prompt = OPTIMIZATION_PROMPT_TEMPLATE.format(
         skill_name=skill_name,
-        test_cases_formatted=test_cases_formatted,
+        current_skill_md=current_content,
+        test_cases_json=test_cases_json,
         iterations=config["iterations"],
     )
 
