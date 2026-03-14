@@ -178,10 +178,7 @@ def _handle_optimize_iteration(
         content=skill_content,
         score=score,
         kept=kept,
-        config={
-            "provider": _active_config.get("provider", ""),
-            "model": _active_config.get("model", ""),
-        },
+        config=_active_config.get("model_config", {}),
     )
 
     # Determine strategy based on iteration count
@@ -219,14 +216,26 @@ def _handle_optimize_iteration(
         "results": case_details,
     }
 
-    summary = (
+    # Build detailed output for the LLM (it needs to see errors to fix them)
+    output_lines = [
         f"Iteration {iteration}: score={score:.4f} "
-        f"(best={max(score, best_score):.4f}, {comparison})"
-    )
+        f"(best={max(score, best_score):.4f}, {comparison})",
+        "",
+    ]
+    for detail in case_details:
+        output_lines.append(f"Test case: {detail['test_case']}")
+        output_lines.append(f"  completed={detail['completed']}, "
+                           f"tool_calls={detail['tool_calls']}, "
+                           f"errors={detail['errors']}")
+        if detail.get("error_messages"):
+            for msg in detail["error_messages"][:10]:  # cap at 10
+                output_lines.append(f"  ERROR: {msg}")
+        if detail.get("run_scores"):
+            output_lines.append(f"  run_scores={detail['run_scores']}")
 
     return ToolResult(
         success=True,
-        output=summary,
+        output="\n".join(output_lines),
         data=output_data,
     )
 
