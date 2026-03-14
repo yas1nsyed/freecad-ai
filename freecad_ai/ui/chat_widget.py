@@ -495,6 +495,7 @@ class ChatDockWidget(QDockWidget):
         self._mcp_connected = False
         self._vision_fallback_tool = None   # runtime-only, found after MCP connect
         self._vision_hint_shown = False      # one-time hint for untested state
+        self._optimization_active = False
 
         self._build_ui()
         self._ensure_vision_fallback()
@@ -828,6 +829,15 @@ class ChatDockWidget(QDockWidget):
 
     def _new_chat(self):
         """Start a new conversation."""
+        # Clean up optimization state
+        if self._optimization_active:
+            try:
+                from ..tools.optimize_tools import stop_optimization
+                stop_optimization()
+            except ImportError:
+                pass
+            self._optimization_active = False
+
         if self.conversation.messages:
             self.conversation.save()
 
@@ -985,7 +995,33 @@ class ChatDockWidget(QDockWidget):
 
             from ..tools.setup import create_default_registry
             from ..llm.providers import get_api_style
-            self._tool_registry = create_default_registry()
+
+            # Build extra tools for active optimization
+            extra_tools = []
+            if self._optimization_active:
+                try:
+                    from ..tools.optimize_tools import get_optimize_iteration_tool, _active_config
+                    extra_tools = [get_optimize_iteration_tool()]
+                    # Pass the tool executor to the active config so evaluator can dispatch
+                    if _active_config is not None:
+                        from ..tools.executor_utils import MainThreadToolExecutor
+                        executor = MainThreadToolExecutor()
+                        executor.set_registry(None)  # will be set after registry creation
+                        _active_config["_tool_executor"] = executor
+                except ImportError:
+                    pass
+
+            self._tool_registry = create_default_registry(include_mcp=True, extra_tools=extra_tools)
+
+            # Update executor registry if optimization active
+            if self._optimization_active and extra_tools:
+                try:
+                    from ..tools.optimize_tools import _active_config
+                    if _active_config and "_tool_executor" in _active_config:
+                        _active_config["_tool_executor"].set_registry(self._tool_registry)
+                except ImportError:
+                    pass
+
             # Search for vision fallback after registry (with MCP tools) is created
             if not cfg.supports_vision and self._vision_fallback_tool is None:
                 from ..mcp.manager import find_vision_fallback
@@ -1471,6 +1507,11 @@ class ChatDockWidget(QDockWidget):
 
         # Execute the skill
         exec_result = registry.execute_skill(skill_name, args)
+
+        # Check if this is the optimize-skill handler
+        if skill_name == "optimize-skill":
+            self._optimization_active = True
+
         if exec_result.get("inject_prompt"):
             # Inject skill prompt and send to LLM
             prompt_text = exec_result["inject_prompt"]
