@@ -250,11 +250,11 @@ class MainThreadToolExecutor(QObject):
     Used by both _LLMWorker (for the chat agentic loop) and
     SkillEvaluator (for headless evaluation runs).
     """
-    _execute_signal = Signal(str, dict, object)  # tool_name, args, result_holder
+    _execute_signal = Signal(str, str, object)  # tool_name, args_json, result_holder
 
     def __init__(self):
         super().__init__()
-        self._execute_signal.connect(self._do_execute, Qt.QueuedConnection)
+        self._execute_signal.connect(self._on_execute, Qt.QueuedConnection)
         self._mutex = QMutex()
         self._condition = QWaitCondition()
         self._registry = None
@@ -263,20 +263,40 @@ class MainThreadToolExecutor(QObject):
         self._registry = registry
 
     def execute(self, tool_name: str, args: dict) -> ToolResult:
-        """Call from any thread. Blocks until execution completes on main thread."""
+        """Call from any thread. Blocks until execution completes on main thread.
+
+        If already on the main thread (e.g., inside optimize_iteration handler),
+        executes directly to avoid deadlock.
+        """
+        import json
+        app = QtCore.QCoreApplication.instance()
+        if app and QtCore.QThread.currentThread() == app.thread():
+            # Already on main thread -- execute directly
+            holder = {"result": None}
+            self._do_execute_sync(tool_name, args, holder)
+            return holder["result"]
+        # Cross-thread dispatch via signal
         holder = {"result": None}
+        args_json = json.dumps(args)
         self._mutex.lock()
-        self._execute_signal.emit(tool_name, args, holder)
+        self._execute_signal.emit(tool_name, args_json, holder)
         self._condition.wait(self._mutex)
         self._mutex.unlock()
         return holder["result"]
 
-    def _do_execute(self, tool_name, args, holder):
-        """Runs on main thread via signal. Must always wake condition to prevent deadlock."""
+    def _do_execute_sync(self, tool_name, args, holder):
+        """Execute tool and store result. Never leaks exceptions."""
         try:
             holder["result"] = self._registry.execute(tool_name, args)
         except Exception as e:
-            holder["result"] = ToolResult(success=False, error=str(e))
+            holder["result"] = ToolResult(success=False, output="", error=str(e))
+
+    def _on_execute(self, tool_name, args_json, holder):
+        """Runs on main thread via queued signal. Always wakes condition."""
+        import json
+        args = json.loads(args_json)
+        try:
+            self._do_execute_sync(tool_name, args, holder)
         finally:
             self._mutex.lock()
             self._condition.wakeAll()

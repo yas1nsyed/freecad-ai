@@ -163,6 +163,17 @@ class TestMainThreadToolExecutor:
         executor._do_execute_sync("bad_tool", {}, holder)
         assert holder["result"].success is False
         assert "FreeCAD crashed" in holder["result"].error
+
+    def test_execute_direct_when_no_qt(self):
+        """Without Qt, execute() runs directly on calling thread."""
+        executor = MainThreadToolExecutor()
+        mock_registry = MagicMock()
+        expected = ToolResult(success=True, output="ok")
+        mock_registry.execute.return_value = expected
+        executor.set_registry(mock_registry)
+
+        result = executor.execute("tool", {"x": 1})
+        assert result is expected
 ```
 
 - [ ] **Step 2: Run tests to verify they fail**
@@ -226,7 +237,7 @@ class MainThreadToolExecutor:
             holder["result"] = self._registry.execute(tool_name, args)
         except Exception as e:
             logger.error("Tool execution failed: %s -- %s", tool_name, e)
-            holder["result"] = ToolResult(success=False, error=str(e))
+            holder["result"] = ToolResult(success=False, output="", error=str(e))
 
 
 if _HAS_QT:
@@ -246,8 +257,19 @@ if _HAS_QT:
             self._condition = QWaitCondition()
 
         def execute(self, tool_name: str, args: dict) -> ToolResult:
-            """Call from any thread. Blocks until main thread completes."""
+            """Call from any thread. Blocks until main thread completes.
+
+            If already on the main thread (e.g., called from optimize_iteration
+            handler), executes directly to avoid deadlock.
+            """
             import json
+            app = QtCore.QCoreApplication.instance()
+            if app and QtCore.QThread.currentThread() == app.thread():
+                # Already on main thread -- execute directly (avoids deadlock)
+                holder = {"result": None}
+                self._do_execute_sync(tool_name, args, holder)
+                return holder["result"]
+            # Cross-thread dispatch
             holder = {"result": None}
             args_json = json.dumps(args)
             self._mutex.lock()
@@ -316,7 +338,7 @@ class TestCreateDefaultRegistryExtraTools:
             handler=lambda: ToolResult(success=True, output="ok"),
         )
         registry = create_default_registry(include_mcp=False, extra_tools=[extra])
-        tool = registry.get_tool("test_extra_tool")
+        tool = registry.get("test_extra_tool")
         assert tool is not None
         assert tool.name == "test_extra_tool"
 ```
