@@ -1,7 +1,7 @@
 """Tests for skill evaluation framework."""
 import json
 import os
-from freecad_ai.extensions.skill_evaluator import EvalResult, OptimizationState
+from freecad_ai.extensions.skill_evaluator import EvalResult, OptimizationState, compute_composite_score
 
 
 class TestEvalResult:
@@ -98,3 +98,70 @@ class TestOptimizationState:
         state.save_version(1, "# V1", score=0.65, kept=True, config=config)
         assert state.is_config_stale(config) is False
         assert state.is_config_stale({"model": "llama3", "provider": "ollama"}) is True
+
+
+class TestScoring:
+    def test_perfect_score(self):
+        results = [EvalResult(
+            test_case="test", tool_calls=10, errors=0, retries=0, completed=True,
+        )]
+        config = {
+            "metrics": ["completion", "error_rate", "retries", "efficiency"],
+            "weights": {"completion": 0.30, "error_rate": 0.25, "retries": 0.10, "efficiency": 0.10},
+            "budget": 30,
+        }
+        score = compute_composite_score(results, config)
+        assert score > 0.9
+
+    def test_zero_score_not_completed(self):
+        results = [EvalResult(test_case="test", completed=False, tool_calls=30)]
+        config = {"metrics": ["completion"], "weights": {"completion": 1.0}, "budget": 30}
+        score = compute_composite_score(results, config)
+        assert score == 0.0
+
+    def test_error_rate_reduces_score(self):
+        results = [EvalResult(test_case="test", tool_calls=10, errors=5, completed=True)]
+        config = {"metrics": ["error_rate"], "weights": {"error_rate": 1.0}, "budget": 30}
+        score = compute_composite_score(results, config)
+        assert abs(score - 0.5) < 0.01
+
+    def test_geometric_correctness(self):
+        results = [EvalResult(
+            test_case="test", completed=True, tool_calls=10,
+            measurements={"bbox": [100, 60, 40]},
+        )]
+        config = {
+            "metrics": ["correctness"], "weights": {"correctness": 1.0}, "budget": 30,
+            "test_cases": [{"args": "test", "expected_bbox": [100, 60, 40]}],
+        }
+        assert compute_composite_score(results, config) == 1.0
+
+    def test_geometric_correctness_partial(self):
+        results = [EvalResult(
+            test_case="test", completed=True, tool_calls=10,
+            measurements={"bbox": [110, 60, 40]},
+        )]
+        config = {
+            "metrics": ["correctness"], "weights": {"correctness": 1.0}, "budget": 30,
+            "test_cases": [{"args": "test", "expected_bbox": [100, 60, 40]}],
+        }
+        score = compute_composite_score(results, config)
+        assert 0.9 < score < 1.0
+
+    def test_missing_metric_weight_redistributed(self):
+        results = [EvalResult(test_case="test", completed=True, tool_calls=10, errors=0)]
+        config = {
+            "metrics": ["completion", "correctness"],
+            "weights": {"completion": 0.5, "correctness": 0.5},
+            "budget": 30, "test_cases": [{"args": "test"}],
+        }
+        assert compute_composite_score(results, config) == 1.0
+
+    def test_multiple_test_cases_averaged(self):
+        results = [
+            EvalResult(test_case="a", completed=True, tool_calls=10, errors=0),
+            EvalResult(test_case="b", completed=False, tool_calls=30, errors=10),
+        ]
+        config = {"metrics": ["completion"], "weights": {"completion": 1.0}, "budget": 30}
+        score = compute_composite_score(results, config)
+        assert abs(score - 0.5) < 0.01
