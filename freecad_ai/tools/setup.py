@@ -10,7 +10,7 @@ from .registry import ToolRegistry
 from .freecad_tools import ALL_TOOLS
 
 
-def create_default_registry(include_mcp: bool = True) -> ToolRegistry:
+def create_default_registry(include_mcp: bool = True, extra_tools: list | None = None) -> ToolRegistry:
     """Create a ToolRegistry with all built-in FreeCAD tools registered.
 
     Also loads user extension tools from USER_TOOLS_DIR, and optionally
@@ -49,5 +49,10 @@ def create_default_registry(include_mcp: bool = True) -> ToolRegistry:
             manager.register_tools_into(registry)
         except Exception:
             pass  # MCP not available or no servers connected
+
+    # Register extra tools (e.g., optimize_iteration during optimization)
+    if extra_tools:
+        for tool in extra_tools:
+            registry.register(tool)
 
     return registry
