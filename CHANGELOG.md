@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- **Skill optimizer** — `/optimize-skill` command that iteratively improves SKILL.md files by running test cases, scoring results (completion, errors, geometric correctness, efficiency, visual similarity), and using the LLM to modify instructions. Includes PySide2 configuration dialog, version history with original backup, and three optimization strategies (conservative, balanced, aggressive). Inspired by [autoresearch](https://github.com/karpathy/autoresearch).
+
 ## [0.3.0-alpha] - 2026-03-14
 
 Vision routing, image support, user extension tools, and deferred MCP tool loading.
