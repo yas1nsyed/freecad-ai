@@ -22,11 +22,17 @@ class MCPManager:
     def __init__(self):
         self._clients: dict[str, MCPClient] = {}
 
-    def connect_all(self, server_configs: list[dict]):
-        """Connect to all configured MCP servers.
+    def connect_all(self, server_configs: list[dict], *,
+                     only_deferred: bool | None = None):
+        """Connect to configured MCP servers.
 
         Each config: {"name": str, "command": str, "args": list,
                       "env": dict, "enabled": bool, "deferred": bool}
+
+        Args:
+            only_deferred: If True, connect only deferred servers.
+                If False, connect only non-deferred servers.
+                If None (default), connect all servers.
 
         The per-server ``deferred`` flag (default True) controls whether tool
         schemas are loaded lazily on demand or eagerly on connect.
@@ -38,10 +44,15 @@ class MCPManager:
             name = cfg.get("name", "")
             if not name:
                 continue
+            if name in self._clients:
+                continue  # already connected
+
+            deferred = cfg.get("deferred", True)
+            if only_deferred is not None and deferred != only_deferred:
+                continue
 
             command = [cfg["command"]] + cfg.get("args", [])
             env = cfg.get("env") or None
-            deferred = cfg.get("deferred", True)
 
             try:
                 client = MCPClient(name, command, env, deferred=deferred)
@@ -74,7 +85,7 @@ class MCPManager:
 
                 # Build params eagerly if schema is already loaded,
                 # otherwise set up lazy loading
-                if tool_info.input_schema:
+                if tool_info.input_schema is not None:
                     params = _json_schema_to_tool_params(tool_info.input_schema)
                     lazy_params = None
                 else:

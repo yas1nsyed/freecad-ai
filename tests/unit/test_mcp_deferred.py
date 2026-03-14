@@ -178,7 +178,7 @@ class TestMCPClientDeferred:
         assert len(client.tools) == 2
         # Schemas should NOT be populated in deferred mode
         for tool in client.tools:
-            assert tool.input_schema == {}
+            assert tool.input_schema is None
 
     def test_eager_connect_has_schemas(self):
         """Non-deferred connect loads schemas immediately."""

@@ -172,8 +172,9 @@ class TestImageInterception:
     def test_describe_fn_replaces_images(self):
         conv = self._make_conversation_with_image()
 
-        def mock_describe(b64_data):
-            return f"Description of image ({len(b64_data)} bytes)"
+        def mock_describe(data_url):
+            assert data_url.startswith("data:image/png;base64,")
+            return f"Description of image ({data_url})"
 
         msgs = conv.get_messages_for_api(api_style="openai", describe_fn=mock_describe)
         content = msgs[0]["content"]
@@ -182,7 +183,7 @@ class TestImageInterception:
         assert "text" in types
         desc_blocks = [b for b in content if "Description of image" in b.get("text", "")]
         assert len(desc_blocks) == 1
-        assert "(6 bytes)" in desc_blocks[0]["text"]
+        assert "data:image/png;base64,abc123" in desc_blocks[0]["text"]
 
     def test_describe_fn_error_produces_error_text(self):
         conv = self._make_conversation_with_image()
@@ -220,8 +221,8 @@ class TestImageInterception:
         ])
         descriptions = []
 
-        def mock_describe(b64_data):
-            desc = f"Described {b64_data}"
+        def mock_describe(data_url):
+            desc = f"Described {data_url}"
             descriptions.append(desc)
             return desc
 
@@ -240,7 +241,7 @@ class TestImageInterception:
         ])
         call_count = [0]
 
-        def flaky_describe(b64_data):
+        def flaky_describe(data_url):
             call_count[0] += 1
             if call_count[0] == 1:
                 raise RuntimeError("Server timeout")

@@ -24,7 +24,7 @@ class MCPToolInfo:
     """Metadata for a tool discovered from an MCP server."""
     name: str
     description: str
-    input_schema: dict = field(default_factory=dict)
+    input_schema: dict | None = None
 
 
 @dataclass
@@ -171,7 +171,7 @@ class MCPClient:
             if (query_lower in tool.name.lower()
                     or query_lower in tool.description.lower()):
                 # Ensure schema is loaded for matched tools
-                if not tool.input_schema:
+                if tool.input_schema is None:
                     self.get_tool_schema(tool.name)
                 results.append(tool)
         return results

@@ -285,16 +285,16 @@ class SettingsDialog(QDialog):
         btn_layout = QHBoxLayout()
         btn_layout.addStretch()
 
-        save_btn = QPushButton(translate("SettingsDialog", "Save"))
-        save_btn.setStyleSheet(
+        self.save_btn = QPushButton(translate("SettingsDialog", "Save"))
+        self.save_btn.setStyleSheet(
             "QPushButton { padding: 6px 24px; font-weight: bold; }"
         )
-        save_btn.clicked.connect(self._save)
-        btn_layout.addWidget(save_btn)
+        self.save_btn.clicked.connect(self._save)
+        btn_layout.addWidget(self.save_btn)
 
-        cancel_btn = QPushButton(translate("SettingsDialog", "Cancel"))
-        cancel_btn.clicked.connect(self.reject)
-        btn_layout.addWidget(cancel_btn)
+        self.cancel_btn = QPushButton(translate("SettingsDialog", "Cancel"))
+        self.cancel_btn.clicked.connect(self.reject)
+        btn_layout.addWidget(self.cancel_btn)
 
         layout.addLayout(btn_layout)
 
@@ -396,6 +396,8 @@ class SettingsDialog(QDialog):
         self._save_temp()
 
         self.test_btn.setEnabled(False)
+        self.save_btn.setEnabled(False)
+        self.cancel_btn.setEnabled(False)
         self.test_status.setText(translate("SettingsDialog", "Testing..."))
         self.test_status.setStyleSheet("color: #666;")
 
@@ -406,16 +408,23 @@ class SettingsDialog(QDialog):
 
     def _on_test_finished(self, success, message):
         """Handle test connection result."""
-        self.test_btn.setEnabled(True)
         if success:
+            # Keep buttons disabled — vision probe is still running
             self.test_status.setText(message)
             self.test_status.setStyleSheet("color: #2e7d32;")
         else:
+            # No vision probe on failure — re-enable buttons now
+            self.test_btn.setEnabled(True)
+            self.save_btn.setEnabled(True)
+            self.cancel_btn.setEnabled(True)
             self.test_status.setText(translate("SettingsDialog", "Failed: ") + message)
             self.test_status.setStyleSheet("color: #c62828;")
 
     def _on_vision_probed(self, supports_vision: bool):
         """Handle vision probe result — persists to config immediately."""
+        self.test_btn.setEnabled(True)
+        self.save_btn.setEnabled(True)
+        self.cancel_btn.setEnabled(True)
         cfg = get_config()
         cfg.vision_detected = supports_vision
         save_current_config()
@@ -423,9 +432,16 @@ class SettingsDialog(QDialog):
         # Append vision status to test output
         current = self.test_status.text()
         if supports_vision:
-            self.test_status.setText(current + " | Vision: supported")
+            vision_msg = translate("SettingsDialog", "Vision: supported")
         else:
-            self.test_status.setText(current + " | Vision: not supported")
+            vision_msg = translate("SettingsDialog", "Vision: not supported")
+        self.test_status.setText(current + "\n" + vision_msg)
+        # Log to FreeCAD console
+        try:
+            import FreeCAD
+            FreeCAD.Console.PrintMessage(f"FreeCAD AI: {vision_msg}\n")
+        except ImportError:
+            pass
 
     def _save_temp(self):
         """Temporarily apply current UI values to config (for test connection)."""

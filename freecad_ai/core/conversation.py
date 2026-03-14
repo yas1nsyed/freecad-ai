@@ -247,8 +247,10 @@ class Conversation:
             for block in msg["content"]:
                 if block.get("type") == "image":
                     b64_data = block.get("data", "")
+                    mime = block.get("mime_type", "image/png")
+                    data_url = f"data:{mime};base64,{b64_data}"
                     try:
-                        description = describe_fn(b64_data)
+                        description = describe_fn(data_url)
                         new_blocks.append({
                             "type": "text",
                             "text": f"[Image described by llm-vision-mcp: {description}]",

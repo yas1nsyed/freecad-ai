@@ -497,6 +497,7 @@ class ChatDockWidget(QDockWidget):
         self._vision_hint_shown = False      # one-time hint for untested state
 
         self._build_ui()
+        self._ensure_vision_fallback()
         self._refresh_image_controls()
 
     def _build_ui(self):
@@ -748,6 +749,35 @@ class ChatDockWidget(QDockWidget):
         cfg.mode = "plan" if index == 0 else "act"
         save_current_config()
 
+    def _ensure_vision_fallback(self):
+        """Connect non-deferred MCP servers and search for a vision fallback.
+
+        Called on startup and after settings changes so that image controls
+        can be enabled/disabled correctly without waiting for the first message.
+        Non-deferred servers are connected eagerly; deferred servers wait for
+        the first Act-mode message.
+        """
+        cfg = get_config()
+        if cfg.supports_vision or not cfg.mcp_servers:
+            return
+        if self._vision_fallback_tool is not None:
+            return
+        # Only connect non-deferred servers at this point
+        has_non_deferred = any(
+            not s.get("deferred", True) and s.get("enabled", True)
+            for s in cfg.mcp_servers
+        )
+        if has_non_deferred:
+            self._connect_mcp_servers(cfg, only_deferred=False)
+        # Build registry (with whatever is connected so far) and search
+        from ..mcp.manager import get_mcp_manager
+        manager = get_mcp_manager()
+        if manager.connected_servers:
+            from ..tools.setup import create_default_registry
+            from ..mcp.manager import find_vision_fallback
+            self._tool_registry = create_default_registry()
+            self._vision_fallback_tool = find_vision_fallback(self._tool_registry)
+
     def _refresh_image_controls(self):
         """Enable/disable image controls based on vision capability."""
         cfg = get_config()
@@ -792,10 +822,8 @@ class ChatDockWidget(QDockWidget):
             self._vision_fallback_tool = None
         if cfg.mcp_servers != old_mcp:
             self._vision_fallback_tool = None
-        # If vision not supported and MCP already connected, search now
-        if not cfg.supports_vision and self._vision_fallback_tool is None and self._tool_registry:
-            from ..mcp.manager import find_vision_fallback
-            self._vision_fallback_tool = find_vision_fallback(self._tool_registry)
+            self._mcp_connected = False
+        self._ensure_vision_fallback()
         self._refresh_image_controls()
 
     def _new_chat(self):
@@ -1620,28 +1648,37 @@ class ChatDockWidget(QDockWidget):
             self.token_label.setText(
                 translate("ChatDockWidget", "tokens: ~{}").format(tokens))
 
-    def _connect_mcp_servers(self, cfg):
-        """Connect to configured MCP servers (called once on first tool-enabled send)."""
+    def _connect_mcp_servers(self, cfg, *, only_deferred=None):
+        """Connect to configured MCP servers.
+
+        Args:
+            only_deferred: If True, connect only deferred servers.
+                If False, connect only non-deferred servers.
+                If None, connect all servers.
+        """
         if not cfg.mcp_servers:
             self._mcp_connected = True
             return
         try:
             from ..mcp.manager import get_mcp_manager
             manager = get_mcp_manager()
-            manager.connect_all(cfg.mcp_servers)
-            self._mcp_connected = True
-            servers = manager.connected_servers
-            if servers:
+            prev_servers = set(manager.connected_servers)
+            manager.connect_all(cfg.mcp_servers, only_deferred=only_deferred)
+            if only_deferred is None or only_deferred is True:
+                self._mcp_connected = True
+            new_servers = set(manager.connected_servers) - prev_servers
+            if new_servers:
                 self._append_html(
                     '<div style="margin: 4px 0; padding: 4px 8px; '
                     'background-color: #e8f5e9; border-left: 3px solid #4caf50; '
                     'border-radius: 0 4px 4px 0; font-size: 11px; color: #2e7d32;">'
                     '{}</div>'.format(
                         translate("ChatDockWidget", "MCP: connected to {}").format(
-                            ", ".join(servers)))
+                            ", ".join(sorted(new_servers))))
                 )
         except Exception as e:
-            self._mcp_connected = True  # Don't retry on failure
+            if only_deferred is None or only_deferred is True:
+                self._mcp_connected = True  # Don't retry on failure
             self._append_html(
                 '<div style="margin: 4px 0; padding: 4px 8px; '
                 'background-color: #fff3e0; border-left: 3px solid #ff9800; '
