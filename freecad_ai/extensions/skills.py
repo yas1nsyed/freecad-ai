@@ -15,6 +15,12 @@ from dataclasses import dataclass, field
 
 from ..config import SKILLS_DIR
 
+# Built-in skills directory (in the repo, alongside freecad_ai/)
+BUILTIN_SKILLS_DIR = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.dirname(__file__))),
+    "skills",
+)
+
 
 @dataclass
 class Skill:
@@ -35,12 +41,23 @@ class SkillsRegistry:
         self._load_skills()
 
     def _load_skills(self):
-        """Scan skills directory and load skill definitions."""
-        if not os.path.isdir(SKILLS_DIR):
+        """Scan skills directories and load skill definitions.
+
+        Scans both the built-in skills directory (in the repo) and the user
+        skills directory (~/.config/FreeCAD/FreeCADAI/skills/). User skills
+        take precedence over built-in skills with the same name.
+        """
+        # Load built-in first, then user (user overrides built-in)
+        for skills_dir in (BUILTIN_SKILLS_DIR, SKILLS_DIR):
+            self._scan_skills_dir(skills_dir)
+
+    def _scan_skills_dir(self, skills_dir: str):
+        """Scan a single directory for skill definitions."""
+        if not os.path.isdir(skills_dir):
             return
 
-        for entry in os.listdir(SKILLS_DIR):
-            skill_dir = os.path.join(SKILLS_DIR, entry)
+        for entry in os.listdir(skills_dir):
+            skill_dir = os.path.join(skills_dir, entry)
             skill_file = os.path.join(skill_dir, "SKILL.md")
             if not os.path.isdir(skill_dir) or not os.path.isfile(skill_file):
                 continue

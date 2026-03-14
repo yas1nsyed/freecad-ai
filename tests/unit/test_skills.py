@@ -43,6 +43,7 @@ class TestSkillsRegistryLoad:
         skills_dir = tmp_path / "empty_skills"
         skills_dir.mkdir()
         monkeypatch.setattr(skills_mod, "SKILLS_DIR", str(skills_dir))
+        monkeypatch.setattr(skills_mod, "BUILTIN_SKILLS_DIR", str(skills_dir))
 
         reg = SkillsRegistry()
         assert reg.get_available() == []
@@ -50,6 +51,7 @@ class TestSkillsRegistryLoad:
     def test_missing_skills_dir(self, monkeypatch):
         import freecad_ai.extensions.skills as skills_mod
         monkeypatch.setattr(skills_mod, "SKILLS_DIR", "/nonexistent/skills")
+        monkeypatch.setattr(skills_mod, "BUILTIN_SKILLS_DIR", "/nonexistent/builtin")
 
         reg = SkillsRegistry()
         assert reg.get_available() == []
@@ -61,6 +63,7 @@ class TestSkillsRegistryLoad:
         (skills_dir / "not-a-skill").mkdir()
         (skills_dir / "not-a-skill" / "readme.txt").write_text("nope")
         monkeypatch.setattr(skills_mod, "SKILLS_DIR", str(skills_dir))
+        monkeypatch.setattr(skills_mod, "BUILTIN_SKILLS_DIR", str(skills_dir))
 
         reg = SkillsRegistry()
         assert reg.get_available() == []
@@ -232,6 +235,7 @@ class TestGetDescriptions:
     def test_empty_when_no_skills(self, monkeypatch):
         import freecad_ai.extensions.skills as skills_mod
         monkeypatch.setattr(skills_mod, "SKILLS_DIR", "/nonexistent")
+        monkeypatch.setattr(skills_mod, "BUILTIN_SKILLS_DIR", "/nonexistent/builtin")
 
         reg = SkillsRegistry()
         assert reg.get_descriptions() == ""
