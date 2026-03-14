@@ -187,6 +187,152 @@ def _score_single(result: EvalResult, config: dict) -> tuple[float, float]:
     return weighted_sum, total_weight
 
 
+class SkillEvaluator:
+    """Runs a skill in a headless agentic loop and collects metrics."""
+
+    def __init__(self, config: dict, tool_executor=None):
+        self._config = config
+        self._tool_executor = tool_executor
+        self._cancelled = False
+
+    def cancel(self):
+        self._cancelled = True
+
+    def evaluate(self, skill_name: str, skill_content: str,
+                 test_cases: list[dict], runs_per_test: int = 2) -> list[EvalResult]:
+        """Run skill against all test cases and return results."""
+        from ..llm.client import create_client_from_config
+        from ..core.system_prompt import build_system_prompt
+        from ..llm.providers import get_api_style
+        from ..config import get_config
+
+        cfg = get_config()
+        api_style = get_api_style(cfg.provider.name)
+        system = build_system_prompt(mode="act", tools_enabled=True)
+        client = create_client_from_config()
+
+        from ..tools.setup import create_default_registry
+        registry = create_default_registry(include_mcp=False)
+        if self._tool_executor:
+            self._tool_executor.set_registry(registry)
+        tools_schema = registry.to_openai_schema() if api_style != "anthropic" \
+            else registry.to_anthropic_schema()
+
+        results = []
+        for tc in test_cases:
+            args = tc.get("args", "")
+            run_results = []
+            for run in range(runs_per_test):
+                if self._cancelled:
+                    break
+                result = self._run_skill_headless(
+                    skill_content=skill_content,
+                    test_args=args,
+                    client=client,
+                    tools_schema=tools_schema,
+                    system_prompt=system,
+                )
+                result.test_case = args
+                run_results.append(result)
+            if run_results:
+                avg = self._average_results(run_results, args)
+                results.append(avg)
+        return results
+
+    def _run_skill_headless(self, skill_content: str, test_args: str,
+                            client, tools_schema, system_prompt: str) -> EvalResult:
+        """Run a single skill execution and collect metrics."""
+        from ..core.conversation import Conversation
+
+        conv = Conversation()
+        conv.compaction_enabled = False
+        conv.add_user_message(f"{skill_content}\n\nArguments: {test_args}")
+
+        budget = self._config.get("budget", 30)
+        timeout = self._config.get("timeout", 300)
+        start_time = time.time()
+
+        tool_calls = 0
+        errors = 0
+        error_messages = []
+
+        for _turn in range(budget):
+            if self._cancelled:
+                break
+            if time.time() - start_time > timeout:
+                break
+
+            messages = conv.get_messages_for_api(api_style="openai")
+            response = client.send_with_tools(
+                messages, system=system_prompt, tools=tools_schema
+            )
+
+            if not response.tool_calls:
+                conv.add_assistant_message(response.text)
+                return EvalResult(
+                    test_case=test_args,
+                    tool_calls=tool_calls,
+                    errors=errors,
+                    error_messages=error_messages,
+                    completed=True,
+                )
+
+            # Add assistant message with tool calls
+            conv.add_assistant_message(response.text, tool_calls=[
+                {"id": tc.id, "name": tc.name, "arguments": tc.arguments}
+                for tc in response.tool_calls
+            ])
+
+            for tc in response.tool_calls:
+                if self._cancelled:
+                    break
+                tool_calls += 1
+                if self._tool_executor:
+                    result = self._tool_executor.execute(tc.name, tc.arguments)
+                else:
+                    from ..tools.registry import ToolResult as TR
+                    result = TR(success=True, output="(no executor)")
+
+                if not result.success:
+                    errors += 1
+                    error_messages.append(f"{tc.name}: {result.error}")
+
+                conv.add_tool_result(
+                    tc.id,
+                    result.output if result.success else result.error,
+                )
+
+        return EvalResult(
+            test_case=test_args,
+            tool_calls=tool_calls,
+            errors=errors,
+            error_messages=error_messages,
+            completed=False,
+        )
+
+    def _average_results(self, run_results: list[EvalResult],
+                         test_case: str) -> EvalResult:
+        """Average metrics across multiple runs of the same test case."""
+        n = len(run_results)
+        per_run_scores = [
+            _score_single(r, self._config)[0] for r in run_results
+        ]
+        return EvalResult(
+            test_case=test_case,
+            tool_calls=sum(r.tool_calls for r in run_results) // n,
+            errors=sum(r.errors for r in run_results) // n,
+            retries=sum(r.retries for r in run_results) // n,
+            error_messages=[msg for r in run_results for msg in r.error_messages],
+            measurements=run_results[-1].measurements,
+            completed=any(r.completed for r in run_results),
+            visual_score=(
+                sum(r.visual_score for r in run_results if r.visual_score is not None) / n
+                if any(r.visual_score is not None for r in run_results) else None
+            ),
+            run_scores=per_run_scores,
+        )
+
+
 def compute_composite_score(results: list[EvalResult], config: dict) -> float:
     """Compute composite score across all test cases. Returns 0.0-1.0."""
     if not results:

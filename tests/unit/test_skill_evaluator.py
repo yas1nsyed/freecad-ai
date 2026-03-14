@@ -165,3 +165,98 @@ class TestScoring:
         config = {"metrics": ["completion"], "weights": {"completion": 1.0}, "budget": 30}
         score = compute_composite_score(results, config)
         assert abs(score - 0.5) < 0.01
+
+
+from unittest.mock import MagicMock
+from freecad_ai.extensions.skill_evaluator import SkillEvaluator
+
+
+class TestSkillEvaluator:
+    def _make_config(self, **overrides):
+        config = {
+            "metrics": ["completion", "error_rate", "efficiency"],
+            "weights": {"completion": 0.4, "error_rate": 0.4, "efficiency": 0.2},
+            "budget": 10, "timeout": 60,
+            "test_cases": [{"args": "50x30x20mm"}],
+        }
+        config.update(overrides)
+        return config
+
+    def test_init(self):
+        evaluator = SkillEvaluator(self._make_config(), tool_executor=MagicMock())
+        assert evaluator._config is not None
+
+    def test_run_skill_headless_completes(self):
+        """LLM returns no tool calls -- skill completes immediately."""
+        evaluator = SkillEvaluator(self._make_config(), tool_executor=MagicMock())
+        mock_client = MagicMock()
+        resp = MagicMock()
+        resp.tool_calls = []
+        resp.text = "Done"
+        mock_client.send_with_tools.return_value = resp
+        result = evaluator._run_skill_headless(
+            "# Test", "50x30x20mm", mock_client, [], "system")
+        assert result.completed is True
+        assert result.tool_calls == 0
+
+    def test_run_skill_headless_counts_tool_calls(self):
+        """LLM makes one tool call then stops."""
+        from freecad_ai.tools.registry import ToolResult
+        executor = MagicMock()
+        executor.execute.return_value = ToolResult(success=True, output="Created box")
+        evaluator = SkillEvaluator(self._make_config(), tool_executor=executor)
+        mock_client = MagicMock()
+
+        call1 = MagicMock()
+        tc = MagicMock(); tc.name = "create_primitive"; tc.id = "tc1"; tc.arguments = {}
+        call1.tool_calls = [tc]; call1.text = ""
+        call2 = MagicMock(); call2.tool_calls = []; call2.text = "Done"
+        mock_client.send_with_tools.side_effect = [call1, call2]
+
+        result = evaluator._run_skill_headless(
+            "# Test", "50x30x20mm", mock_client, [], "system")
+        assert result.completed is True
+        assert result.tool_calls == 1
+        assert result.errors == 0
+
+    def test_run_skill_headless_counts_errors(self):
+        """Failed tool calls increment error count."""
+        from freecad_ai.tools.registry import ToolResult
+        executor = MagicMock()
+        executor.execute.return_value = ToolResult(
+            success=False, output="", error="Sketch not found")
+        evaluator = SkillEvaluator(self._make_config(), tool_executor=executor)
+        mock_client = MagicMock()
+
+        call1 = MagicMock()
+        tc = MagicMock(); tc.name = "pad_sketch"; tc.id = "tc1"; tc.arguments = {}
+        call1.tool_calls = [tc]; call1.text = ""
+        call2 = MagicMock(); call2.tool_calls = []; call2.text = "Failed"
+        mock_client.send_with_tools.side_effect = [call1, call2]
+
+        result = evaluator._run_skill_headless(
+            "# Test", "50x30x20mm", mock_client, [], "system")
+        assert result.errors == 1
+        assert any("Sketch not found" in msg for msg in result.error_messages)
+
+    def test_run_skill_headless_budget_exceeded(self):
+        """Loop stops at budget limit."""
+        from freecad_ai.tools.registry import ToolResult
+        executor = MagicMock()
+        executor.execute.return_value = ToolResult(success=True, output="ok")
+        evaluator = SkillEvaluator(self._make_config(budget=2), tool_executor=executor)
+        mock_client = MagicMock()
+
+        call_count = [0]
+        def make_response(*a, **kw):
+            r = MagicMock()
+            tc = MagicMock(); tc.name = "tool"; tc.id = f"tc{call_count[0]}"; tc.arguments = {}
+            r.tool_calls = [tc]; r.text = ""
+            call_count[0] += 1
+            return r
+        mock_client.send_with_tools.side_effect = make_response
+
+        result = evaluator._run_skill_headless(
+            "# Test", "test", mock_client, [], "system")
+        assert result.completed is False
+        assert result.tool_calls == 2
