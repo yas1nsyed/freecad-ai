@@ -219,18 +219,21 @@ class SkillEvaluator:
             else registry.to_anthropic_schema()
 
         results = []
-        for tc in test_cases:
+        for tc_idx, tc in enumerate(test_cases):
             args = tc.get("args", "")
+            logger.info("Test case %d/%d: %s", tc_idx + 1, len(test_cases), args)
             run_results = []
             for run in range(runs_per_test):
                 if self._cancelled:
                     break
+                logger.info("  Run %d/%d", run + 1, runs_per_test)
                 result = self._run_skill_headless(
                     skill_content=skill_content,
                     test_args=args,
                     client=client,
                     tools_schema=tools_schema,
                     system_prompt=system,
+                    api_style=api_style,
                 )
                 result.test_case = args
                 run_results.append(result)
@@ -240,7 +243,8 @@ class SkillEvaluator:
         return results
 
     def _run_skill_headless(self, skill_content: str, test_args: str,
-                            client, tools_schema, system_prompt: str) -> EvalResult:
+                            client, tools_schema, system_prompt: str,
+                            api_style: str = "openai") -> EvalResult:
         """Run a single skill execution and collect metrics."""
         from ..core.conversation import Conversation
 
@@ -258,17 +262,29 @@ class SkillEvaluator:
 
         for _turn in range(budget):
             if self._cancelled:
+                logger.info("Evaluation cancelled")
                 break
-            if time.time() - start_time > timeout:
+            elapsed = time.time() - start_time
+            if elapsed > timeout:
+                logger.info("Evaluation timed out after %.0fs", elapsed)
                 break
 
-            messages = conv.get_messages_for_api(api_style="openai")
-            response = client.send_with_tools(
-                messages, system=system_prompt, tools=tools_schema
-            )
+            logger.info("Eval turn %d/%d (%.0fs elapsed, %d tool calls)",
+                        _turn + 1, budget, elapsed, tool_calls)
+            messages = conv.get_messages_for_api(api_style=api_style)
+            try:
+                response = client.send_with_tools(
+                    messages, system=system_prompt, tools=tools_schema
+                )
+            except Exception as e:
+                logger.error("LLM call failed in eval: %s", e)
+                error_messages.append(f"LLM error: {e}")
+                break
 
             if not response.tool_calls:
                 conv.add_assistant_message(response.text)
+                logger.info("Eval completed: %d tool calls, %d errors",
+                            tool_calls, errors)
                 return EvalResult(
                     test_case=test_args,
                     tool_calls=tool_calls,
@@ -287,6 +303,7 @@ class SkillEvaluator:
                 if self._cancelled:
                     break
                 tool_calls += 1
+                logger.info("  Tool call #%d: %s", tool_calls, tc.name)
                 if self._tool_executor:
                     result = self._tool_executor.execute(tc.name, tc.arguments)
                 else:

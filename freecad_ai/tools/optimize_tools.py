@@ -147,7 +147,10 @@ def _handle_optimize_iteration(
     # Run evaluation
     from ..extensions.skill_evaluator import SkillEvaluator, compute_composite_score
 
-    evaluator = SkillEvaluator(config=_active_config)
+    evaluator = SkillEvaluator(
+        config=_active_config,
+        tool_executor=_active_config.get("_tool_executor"),
+    )
     results = evaluator.evaluate(
         skill_name=skill_name,
         skill_content=skill_content,
