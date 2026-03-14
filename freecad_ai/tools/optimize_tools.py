@@ -66,7 +66,9 @@ STRATEGY_INSTRUCTIONS = {
 OPTIMIZATION_PROMPT_TEMPLATE = """\
 # Skill Optimization Task
 
-You are optimizing the SKILL.md for skill **{skill_name}**.
+You are an optimization agent. Your ONLY job is to iteratively improve a SKILL.md file by calling the `optimize_iteration` tool repeatedly. You MUST run {iterations} iterations.
+
+## Skill: {skill_name}
 
 ## Current SKILL.md
 
@@ -80,27 +82,41 @@ You are optimizing the SKILL.md for skill **{skill_name}**.
 
 ## Configuration
 
-- Iterations remaining: {iterations}
+- Iterations: {iterations}
 - Runs per test: {runs_per_test}
 - Strategy: {strategy}
 - Enabled metrics: {enabled_metrics}
 - Tool-call budget per run: {budget}
 
-## Workflow
+## MANDATORY WORKFLOW — Follow these steps exactly:
 
-1. Call the `optimize_iteration` tool with the current SKILL.md and test cases to get a baseline score.
-2. Analyze the results — identify the lowest-scoring metrics and error patterns.
-3. Modify the SKILL.md to address weaknesses.
-4. Call `optimize_iteration` again with the updated SKILL.md.
-5. Repeat until iterations are exhausted or the score plateaus.
+**Step 1 — Baseline:** Call `optimize_iteration` with the current SKILL.md exactly as shown above. This establishes the baseline score.
 
-## Rules
+**Step 2 — Analyze:** Read the results carefully. Look at:
+- Which test cases had errors? What were the specific error messages?
+- Common patterns: "Sketch not found" means FreeCAD renamed the sketch. "not found" means wrong object name.
+- FreeCAD naming: sketches are named "Sketch", "Sketch001", "Sketch002" etc. (NOT "Sketch0", "Sketch1"). Bodies may be renamed too.
 
-- Always provide the **complete** SKILL.md content (not a diff) when calling optimize_iteration.
-- Focus improvement efforts on the **lowest-scoring metric** first.
-- If the score does not improve for 3 consecutive iterations, try a different approach or stop early.
+**Step 3 — Modify:** Edit the SKILL.md to fix the errors. Common fixes:
+- Tell the LLM to use `get_document_state` to check actual object names before referencing them
+- Add explicit naming instructions ("name the sketch 'OuterSketch'" in create_sketch)
+- Add warnings about FreeCAD renaming objects
+- Simplify complex multi-step sequences that are error-prone
 
-## Strategy Instruction
+**Step 4 — Re-evaluate:** Call `optimize_iteration` again with your MODIFIED SKILL.md (the complete text, not a diff).
+
+**Step 5 — Repeat:** Go back to Step 2. Keep iterating until you have done {iterations} iterations total.
+
+## CRITICAL RULES
+
+- You MUST call `optimize_iteration` at least {iterations} times total.
+- Each call MUST include the COMPLETE SKILL.md as `skill_content` (not a summary or diff).
+- After seeing results, you MUST modify the SKILL.md and call again. Do NOT just report the results.
+- The `test_cases` parameter must be the same list every time: {test_cases_json}
+- If score plateaus for 3 iterations, try a fundamentally different approach.
+- When all iterations are done, summarize what you changed and the score progression.
+
+## Strategy
 
 {strategy_instruction}
 """
