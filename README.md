@@ -11,6 +11,7 @@ An AI-powered assistant workbench for FreeCAD that generates and executes Python
 - **Tool calling** — 33 structured FreeCAD operations (Act mode) for safer, more reliable modeling
 - **Skills** — reusable instruction sets invoked via `/command` (enclosure, gear, fastener holes, etc.)
 - **Skill optimizer** — automatically improve skill instructions via iterative test-evaluate-modify loop (`/optimize-skill`)
+- **Hooks** — user-defined Python hooks for lifecycle events (block tools, modify input, log activity)
 - **User extension tools** — register your own Python functions as LLM-callable tools (`.py` or `.FCMacro`)
 - **Vision routing** — auto-detects LLM vision capability; non-vision models use MCP fallback via [llm-vision-mcp](https://github.com/ghbalf/llm-vision-mcp), no-vision-path disables image controls
 - **Image support** — attach viewport screenshots and images to chat messages (capture, attach, drag-drop, paste)
