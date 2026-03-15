@@ -689,7 +689,6 @@ class ChatDockWidget(QDockWidget):
             "text": text, "images": [], "mode": mode,
         })
         if hook_result.get("block"):
-            from .message_view import render_message
             self._append_html(render_message("system",
                 f"Blocked by hook: {hook_result.get('reason', 'no reason given')}"))
             return
