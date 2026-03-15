@@ -241,8 +241,10 @@ class SkillEvaluator:
                 attempt += 1
                 is_retry = attempt > runs_per_test
                 if is_retry:
-                    logger.info("  Retry %d (network/timeout error on previous run)",
-                                attempt - runs_per_test)
+                    retry_delay = 5 * (attempt - runs_per_test)  # 5s, 10s
+                    logger.info("  Retry %d (waiting %ds before retry)",
+                                attempt - runs_per_test, retry_delay)
+                    time.sleep(retry_delay)
                 else:
                     logger.info("  Run %d/%d", attempt, runs_per_test)
                 doc_name = f"OptEval_{tc_idx}_{attempt}"
