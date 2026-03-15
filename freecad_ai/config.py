@@ -13,6 +13,7 @@ CONFIG_FILE = os.path.join(CONFIG_DIR, "config.json")
 CONVERSATIONS_DIR = os.path.join(CONFIG_DIR, "conversations")
 SKILLS_DIR = os.path.join(CONFIG_DIR, "skills")
 USER_TOOLS_DIR = os.path.join(CONFIG_DIR, "tools")
+HOOKS_DIR = os.path.join(CONFIG_DIR, "hooks")
 
 # Provider presets
 PROVIDER_PRESETS = {
@@ -75,6 +76,7 @@ class AppConfig:
     # Each entry: {"name": str, "command": str, "args": list, "env": dict, "enabled": bool}
     user_tools_disabled: list = field(default_factory=list)
     scan_freecad_macros: bool = False
+    hooks_disabled: list = field(default_factory=list)
     vision_detected: bool | None = None   # None=not tested, True/False=probe result
     vision_override: bool | None = None   # user manual override, takes precedence
 
@@ -102,7 +104,7 @@ class AppConfig:
 
 def _ensure_dirs():
     """Create config directories if they don't exist."""
-    for d in (CONFIG_DIR, CONVERSATIONS_DIR, SKILLS_DIR, USER_TOOLS_DIR):
+    for d in (CONFIG_DIR, CONVERSATIONS_DIR, SKILLS_DIR, USER_TOOLS_DIR, HOOKS_DIR):
         os.makedirs(d, exist_ok=True)
 
 
