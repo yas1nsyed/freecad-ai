@@ -119,6 +119,20 @@ class SettingsDialog(QDialog):
         self.temperature_edit.setText("0.3")
         params_layout.addRow(translate("SettingsDialog", "Temperature:"), self.temperature_edit)
 
+        self.context_window_spin = QSpinBox()
+        self.context_window_spin.setRange(4000, 1000000)
+        self.context_window_spin.setSingleStep(10000)
+        self.context_window_spin.setValue(20000)
+        self.context_window_spin.setToolTip(
+            translate("SettingsDialog",
+                      "Context window size in tokens.\n"
+                      "Older messages are automatically compacted\n"
+                      "when the conversation exceeds this limit.\n"
+                      "Set to your model's context limit or lower\n"
+                      "to control API costs.")
+        )
+        params_layout.addRow(translate("SettingsDialog", "Context Window:"), self.context_window_spin)
+
         params_group.setLayout(params_layout)
         layout.addWidget(params_group)
 
@@ -222,10 +236,16 @@ class SettingsDialog(QDialog):
         self.mcp_list.setMaximumHeight(100)
         mcp_layout.addWidget(self.mcp_list)
 
+        self.mcp_list.itemDoubleClicked.connect(self._edit_mcp_server)
+
         mcp_btn_layout = QHBoxLayout()
         add_mcp_btn = QPushButton(translate("SettingsDialog", "Add..."))
         add_mcp_btn.clicked.connect(self._add_mcp_server)
         mcp_btn_layout.addWidget(add_mcp_btn)
+
+        edit_mcp_btn = QPushButton(translate("SettingsDialog", "Edit..."))
+        edit_mcp_btn.clicked.connect(self._edit_mcp_server)
+        mcp_btn_layout.addWidget(edit_mcp_btn)
 
         remove_mcp_btn = QPushButton(translate("SettingsDialog", "Remove"))
         remove_mcp_btn.clicked.connect(self._remove_mcp_server)
@@ -313,6 +333,7 @@ class SettingsDialog(QDialog):
         self.base_url_edit.setText(cfg.provider.base_url)
         self.model_edit.setText(cfg.provider.model)
         self.max_tokens_spin.setValue(cfg.max_tokens)
+        self.context_window_spin.setValue(cfg.context_window)
         self.temperature_edit.setText(str(cfg.temperature))
         self.auto_execute_check.setChecked(cfg.auto_execute)
 
@@ -360,6 +381,7 @@ class SettingsDialog(QDialog):
         cfg.provider.base_url = self.base_url_edit.text()
         cfg.provider.model = self.model_edit.text()
         cfg.max_tokens = self.max_tokens_spin.value()
+        cfg.context_window = self.context_window_spin.value()
 
         try:
             cfg.temperature = float(self.temperature_edit.text())
@@ -458,6 +480,10 @@ class SettingsDialog(QDialog):
         except Exception:
             pass
         try:
+            cfg.context_window = self.context_window_spin.value()
+        except Exception:
+            pass
+        try:
             cfg.temperature = float(self.temperature_edit.text())
         except ValueError:
             pass
@@ -486,6 +512,18 @@ class SettingsDialog(QDialog):
                 self._mcp_configs = []
             self._mcp_configs.append(entry)
             self.mcp_list.addItem(self._mcp_list_label(entry))
+
+    def _edit_mcp_server(self):
+        """Edit the selected MCP server configuration."""
+        row = self.mcp_list.currentRow()
+        if row < 0 or not hasattr(self, "_mcp_configs") or row >= len(self._mcp_configs):
+            return
+        existing = self._mcp_configs[row]
+        dlg = _AddMCPServerDialog(self, existing=existing)
+        if dlg.exec():
+            updated = dlg.get_config()
+            self._mcp_configs[row] = updated
+            self.mcp_list.item(row).setText(self._mcp_list_label(updated))
 
     def _remove_mcp_server(self):
         """Remove the selected MCP server from the list."""
@@ -622,15 +660,21 @@ class SettingsDialog(QDialog):
 
 
 class _AddMCPServerDialog(QDialog):
-    """Dialog for adding a new MCP server configuration."""
+    """Dialog for adding or editing an MCP server configuration."""
 
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, existing: dict | None = None):
         super().__init__(parent)
-        self.setWindowTitle(translate("AddMCPServerDialog", "Add MCP Server"))
+        editing = existing is not None
+        self.setWindowTitle(
+            translate("AddMCPServerDialog", "Edit MCP Server") if editing
+            else translate("AddMCPServerDialog", "Add MCP Server")
+        )
         self.setMinimumWidth(400)
-        self._build_ui()
+        self._build_ui(editing)
+        if existing:
+            self._populate(existing)
 
-    def _build_ui(self):
+    def _build_ui(self, editing=False):
         layout = QFormLayout(self)
 
         self.name_edit = QLineEdit()
@@ -663,7 +707,9 @@ class _AddMCPServerDialog(QDialog):
         btn_layout = QHBoxLayout()
         btn_layout.addStretch()
 
-        ok_btn = QPushButton(translate("AddMCPServerDialog", "Add"))
+        ok_label = translate("AddMCPServerDialog", "Save") if editing \
+            else translate("AddMCPServerDialog", "Add")
+        ok_btn = QPushButton(ok_label)
         ok_btn.clicked.connect(self.accept)
         btn_layout.addWidget(ok_btn)
 
@@ -672,6 +718,14 @@ class _AddMCPServerDialog(QDialog):
         btn_layout.addWidget(cancel_btn)
 
         layout.addRow(btn_layout)
+
+    def _populate(self, entry: dict):
+        """Pre-populate fields from an existing MCP server config."""
+        self.name_edit.setText(entry.get("name", ""))
+        self.command_edit.setText(entry.get("command", ""))
+        self.args_edit.setText(" ".join(entry.get("args", [])))
+        self.deferred_check.setChecked(entry.get("deferred", True))
+        self.enabled_check.setChecked(entry.get("enabled", True))
 
     def get_config(self) -> dict:
         args_text = self.args_edit.text().strip()

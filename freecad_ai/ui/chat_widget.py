@@ -691,7 +691,8 @@ class ChatDockWidget(QDockWidget):
         self._attachment_strip.clear()
 
         # Check if conversation needs compaction
-        if self.conversation.needs_compaction():
+        cfg = get_config()
+        if self.conversation.needs_compaction(cfg.context_window):
             self._compact_and_send()
             return
 

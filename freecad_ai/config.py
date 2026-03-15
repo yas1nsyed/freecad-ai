@@ -63,6 +63,7 @@ class AppConfig:
     provider: ProviderConfig = field(default_factory=ProviderConfig)
     mode: str = "plan"  # "plan" or "act"
     max_tokens: int = 4096
+    context_window: int = 20000  # tokens — compaction triggers above this
     temperature: float = 0.3
     auto_execute: bool = False
     max_retries: int = 3
