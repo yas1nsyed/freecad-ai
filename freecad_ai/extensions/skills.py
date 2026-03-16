@@ -115,28 +115,6 @@ class SkillsRegistry:
         """Return list of available skills."""
         return list(self._skills.values())
 
-    def match_free_text(self, text: str) -> tuple[str, str] | None:
-        """Try to match free text to a skill by keyword.
-
-        Returns (skill_name, user_text) if a skill name appears as a word
-        in the text. Returns None if no match. Skills like 'optimize-skill'
-        and 'skill-creator' are excluded (meta-skills, not modeling skills).
-        """
-        excluded = {"optimize-skill", "skill-creator"}
-        text_lower = text.lower()
-        for skill in self._skills.values():
-            if skill.name in excluded:
-                continue
-            # Check if the skill name (or hyphenated parts) appear as a word
-            name = skill.name
-            if name in text_lower:
-                return name, text
-            # Also check without hyphens (e.g., "fastener hole" matches "fastener-hole")
-            name_nohyphen = name.replace("-", " ")
-            if name_nohyphen in text_lower:
-                return name, text
-        return None
-
     def get_descriptions(self) -> str:
         """Return a formatted string of all skill descriptions for the system prompt."""
         if not self._skills:

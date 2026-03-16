@@ -682,18 +682,6 @@ class ChatDockWidget(QDockWidget):
             if handled:
                 return
 
-        # Auto-detect skill from free text (e.g., "create an enclosure" → /enclosure)
-        mode = "plan" if self.mode_combo.currentIndex() == 0 else "act"
-        if mode == "act":
-            from ..extensions.skills import SkillsRegistry
-            match = SkillsRegistry().match_free_text(text)
-            if match:
-                skill_name, _ = match
-                skill_cmd = f"/{skill_name} {text}"
-                handled = self._handle_skill_command(skill_cmd)
-                if handled:
-                    return
-
         # Fire user_prompt_submit hook
         from ..hooks import fire_hook
         mode = "plan" if self.mode_combo.currentIndex() == 0 else "act"
