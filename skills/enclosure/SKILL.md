@@ -34,9 +34,10 @@ Post centers must be far enough from walls so they don't protrude:
 - `create_sketch` on XY, body_name="EnclosureBase": 4 circles at those positions, radius=PR
 - `pad_sketch` length=**H-T**, body_name="EnclosureBase"
 
-**Step 5: Screw holes in posts**
+**Step 5: Screw holes in posts** — MUST complete BEFORE moving to step 6!
 - `create_sketch` on XY, body_name="EnclosureBase": 4 circles at same centers, radius=1.5 (M3)
 - `pocket_sketch` through_all=true, body_name="EnclosureBase"
+- **IMPORTANT**: This pocket goes into EnclosureBase (the base), NOT the lid. Do NOT proceed to step 6 until this pocket is done.
 
 ### 6. Lid body
 
@@ -93,6 +94,7 @@ for obj in App.ActiveDocument.Objects:
 - All sketches on XY plane, attached to the correct body_name
 - The base height is H, pocket depth is H-T, post height is H-T
 - Use **offset=H** for the pocket sketch so it is placed at the top face (creates correct floor-at-bottom orientation)
-- **Screw lid** (default): do steps 4, 5, 7. Skip step 8. Use screw lid variant in step 6.
-- **Press-fit lid**: skip steps 4, 5, 7, 8. Use press-fit/snap-fit lid variant in step 6 (lip only, no tabs).
-- **Snap-fit lid**: skip steps 4, 5, 7. Use press-fit/snap-fit lid variant in step 6, then do step 8 (ridge + tabs).
+- **Complete ALL steps for the base (1–5) before starting the lid (step 6)**. Each create_sketch MUST be followed by its pad_sketch or pocket_sketch before creating the next sketch.
+- **Screw lid** (default): do steps 4, 5, 7. Skip step 9. Use screw lid variant in step 6.
+- **Press-fit lid**: skip steps 4, 5, 7, 9. Use press-fit/snap-fit lid variant in step 6 (lip only, no tabs).
+- **Snap-fit lid**: skip steps 4, 5, 7. Use press-fit/snap-fit lid variant in step 6, then do step 9 (ridge + tabs).
