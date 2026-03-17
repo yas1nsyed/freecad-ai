@@ -523,6 +523,8 @@ class ChatDockWidget(QDockWidget):
         self._vision_fallback_tool = None   # runtime-only, found after MCP connect
         self._vision_hint_shown = False      # one-time hint for untested state
         self._optimization_active = False
+        self._validate_pending = False
+        self._active_skill_name = ""
 
         # Initialize hook registry on main thread (before any worker threads)
         from ..hooks import get_hook_registry
@@ -675,6 +677,13 @@ class ChatDockWidget(QDockWidget):
 
         self.input_edit.clear()
         self._retry_count = 0  # Reset retries for new user message
+        self._active_skill_name = ""
+
+        # Check for --validate flag
+        self._validate_pending = False
+        if "--validate" in text:
+            text = text.replace("--validate", "").strip()
+            self._validate_pending = True
 
         # Check for skill commands
         if text.startswith("/"):
@@ -1356,6 +1365,86 @@ class ChatDockWidget(QDockWidget):
             if vp_img:
                 self._pending_viewport_image = vp_img
 
+        # Run geometry validation if --validate was requested
+        if getattr(self, "_validate_pending", False):
+            self._validate_pending = False
+            self._run_post_validation()
+
+    def _run_post_validation(self):
+        """Run geometry validation after skill completes."""
+        from .message_view import render_message
+
+        skill_name = getattr(self, "_active_skill_name", "")
+        if not skill_name:
+            self._append_html(render_message("system",
+                "No skill detected \u2014 cannot validate without VALIDATION.md."))
+            return
+
+        try:
+            from ..extensions.skills import SkillsRegistry
+            registry = SkillsRegistry()
+            skill = registry.get_skill(skill_name)
+        except Exception:
+            self._append_html(render_message("system",
+                f"Could not load skill '{skill_name}'."))
+            return
+
+        if not skill or not skill.validation_path:
+            self._append_html(render_message("system",
+                f"Skill '{skill_name}' has no VALIDATION.md \u2014 skipping validation."))
+            return
+
+        try:
+            with open(skill.validation_path) as f:
+                validation_content = f.read()
+        except OSError as e:
+            self._append_html(render_message("system",
+                f"Could not read VALIDATION.md: {e}"))
+            return
+
+        # Get params from report_skill_params tool
+        from ..tools.freecad_tools import (
+            get_reported_skill_params, clear_reported_skill_params,
+        )
+        params = get_reported_skill_params() or {}
+        clear_reported_skill_params()
+
+        if not params:
+            self._append_html(render_message("system",
+                "No parameters reported \u2014 LLM did not call report_skill_params. "
+                "Cannot validate."))
+            return
+
+        try:
+            import FreeCAD as App
+            doc = App.ActiveDocument
+        except ImportError:
+            self._append_html(render_message("system",
+                "FreeCAD not available \u2014 cannot validate."))
+            return
+
+        if not doc:
+            self._append_html(render_message("system",
+                "No active document \u2014 cannot validate."))
+            return
+
+        from ..extensions.skill_validator import validate_skill, compute_pass_rate
+        results = validate_skill(doc, params, validation_content)
+
+        if not results:
+            self._append_html(render_message("system",
+                "No validation checks found."))
+            return
+
+        # Format results
+        passed = sum(1 for r in results if r.passed)
+        lines = [f"Validation: {passed}/{len(results)} checks passed"]
+        for r in results:
+            icon = "\u2713" if r.passed else "\u2717"
+            lines.append(f"  {icon}  {r.message}")
+
+        self._append_html(render_message("system", "\n".join(lines)))
+
     @Slot(str)
     def _on_error(self, error_msg):
         """Handle LLM communication error.
@@ -1570,6 +1659,8 @@ class ChatDockWidget(QDockWidget):
         # Check if this is the optimize-skill handler
         if skill_name == "optimize-skill":
             self._optimization_active = True
+
+        self._active_skill_name = skill_name
 
         if exec_result.get("inject_prompt"):
             # Inject skill prompt and send to LLM
