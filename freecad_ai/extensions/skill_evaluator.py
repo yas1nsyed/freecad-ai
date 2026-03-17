@@ -212,7 +212,8 @@ class SkillEvaluator:
         self._cancelled = True
 
     def evaluate(self, skill_name: str, skill_content: str,
-                 test_cases: list[dict], runs_per_test: int = 2) -> list[EvalResult]:
+                 test_cases: list[dict], runs_per_test: int = 2,
+                 validation_content: str = "") -> list[EvalResult]:
         """Run skill against all test cases and return results."""
         from ..llm.client import create_client_from_config
         from ..core.system_prompt import build_system_prompt
@@ -272,6 +273,41 @@ class SkillEvaluator:
                         api_style=api_style,
                     )
                     result.test_case = args
+                    # Run geometry validation if content provided
+                    if (validation_content and not result.llm_error
+                            and result.completed):
+                        tc_params = tc.get("params", {})
+                        # Fallback: check report_skill_params
+                        if not tc_params:
+                            from ..tools.freecad_tools import (
+                                get_reported_skill_params,
+                                clear_reported_skill_params,
+                            )
+                            tc_params = get_reported_skill_params() or {}
+                            clear_reported_skill_params()
+                        try:
+                            import FreeCAD as App
+                            eval_doc = App.getDocument(doc_name)
+                            if eval_doc:
+                                from .skill_validator import (
+                                    validate_skill, compute_pass_rate,
+                                )
+                                check_results = validate_skill(
+                                    eval_doc, tc_params,
+                                    validation_content)
+                                result.measurements["checks"] = [
+                                    {"target": c.target, "check": c.check,
+                                     "passed": c.passed,
+                                     "message": c.message}
+                                    for c in check_results
+                                ]
+                                result.measurements["pass_rate"] = (
+                                    compute_pass_rate(check_results))
+                        except ImportError:
+                            # FreeCAD not available in unit tests
+                            pass
+                        except Exception as e:
+                            logger.error("Validation failed: %s", e)
                     if result.llm_error:
                         logger.warning("  Run failed due to LLM/network error, "
                                        "will retry (%d retries left)",

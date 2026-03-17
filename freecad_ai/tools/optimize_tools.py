@@ -119,7 +119,8 @@ Do NOT try to read files. Do NOT call any other tool. Call `optimize_iteration` 
 
 # ── Core optimization logic ─────────────────────────────────────────────
 
-def _evaluate_once(skill_name, skill_content, parsed_cases, runs_per_test):
+def _evaluate_once(skill_name, skill_content, parsed_cases, runs_per_test,
+                   validation_content=""):
     """Run one evaluation cycle. Returns (results, score, details_text)."""
     from ..extensions.skill_evaluator import SkillEvaluator, compute_composite_score
 
@@ -132,6 +133,7 @@ def _evaluate_once(skill_name, skill_content, parsed_cases, runs_per_test):
         skill_content=skill_content,
         test_cases=parsed_cases,
         runs_per_test=runs_per_test,
+        validation_content=validation_content,
     )
 
     score = compute_composite_score(results, _active_config)
@@ -233,6 +235,24 @@ def _handle_optimize_iteration(
         else:
             parsed_cases.append({"args": str(tc)})
 
+    # Load VALIDATION.md if it exists
+    validation_content = ""
+    try:
+        from ..extensions.skills import SkillsRegistry
+        registry = SkillsRegistry()
+        skill = registry.get_skill(skill_name)
+        if skill and skill.validation_path:
+            with open(skill.validation_path) as f:
+                validation_content = f.read()
+            logger.info("Loaded VALIDATION.md for '%s'", skill_name)
+    except Exception as e:
+        logger.warning("Could not load VALIDATION.md: %s", e)
+
+    # Use VALIDATED_WEIGHTS if validation is available
+    if validation_content and not _active_config.get("weights"):
+        from ..extensions.skill_evaluator import VALIDATED_WEIGHTS
+        _active_config["weights"] = dict(VALIDATED_WEIGHTS)
+
     current_content = skill_content
     all_output_lines = []
     start_time = time.time()
@@ -249,6 +269,7 @@ def _handle_optimize_iteration(
             # 1. Evaluate
             results, score, details_text = _evaluate_once(
                 skill_name, current_content, parsed_cases, runs_per_test,
+                validation_content=validation_content,
             )
 
             # 2. Keep/discard
