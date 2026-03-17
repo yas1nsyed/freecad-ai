@@ -1,9 +1,13 @@
 """Tests for geometry validation engine."""
 import math
+import os
+import tempfile
 from types import SimpleNamespace
+from unittest.mock import patch
 
 import pytest
 
+from freecad_ai.extensions.skills import Skill, SkillsRegistry
 from freecad_ai.extensions.skill_validator import (
     CheckResult,
     ParamDef,
@@ -523,6 +527,51 @@ T: float = 2
         results = validate_skill(doc, {}, validation_md)
         assert len(results) == 1
         assert results[0].passed is True
+
+
+class TestSkillValidationDiscovery:
+    def test_skill_dataclass_accepts_validation_path(self):
+        skill = Skill(name="test", validation_path="/tmp/VALIDATION.md")
+        assert skill.validation_path == "/tmp/VALIDATION.md"
+
+    def test_skill_dataclass_default_validation_path(self):
+        skill = Skill(name="test")
+        assert skill.validation_path == ""
+
+    def test_registry_finds_validation_md(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            skill_dir = os.path.join(tmpdir, "myskill")
+            os.makedirs(skill_dir)
+            # Create SKILL.md
+            with open(os.path.join(skill_dir, "SKILL.md"), "w") as f:
+                f.write("# My Skill\nA test skill.")
+            # Create VALIDATION.md
+            val_path = os.path.join(skill_dir, "VALIDATION.md")
+            with open(val_path, "w") as f:
+                f.write("## Checks\n### Box\n- exists: true\n")
+
+            registry = SkillsRegistry.__new__(SkillsRegistry)
+            registry._skills = {}
+            registry._scan_skills_dir(tmpdir)
+
+            skill = registry.get_skill("myskill")
+            assert skill is not None
+            assert skill.validation_path == val_path
+
+    def test_registry_no_validation_md(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            skill_dir = os.path.join(tmpdir, "myskill")
+            os.makedirs(skill_dir)
+            with open(os.path.join(skill_dir, "SKILL.md"), "w") as f:
+                f.write("# My Skill\nA test skill.")
+
+            registry = SkillsRegistry.__new__(SkillsRegistry)
+            registry._skills = {}
+            registry._scan_skills_dir(tmpdir)
+
+            skill = registry.get_skill("myskill")
+            assert skill is not None
+            assert skill.validation_path == ""
 
 
 class TestResolveParams:

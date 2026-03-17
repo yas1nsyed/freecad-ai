@@ -31,6 +31,7 @@ class Skill:
     content: str = ""  # SKILL.md contents
     trigger: str = ""  # Slash command, e.g. "/thread-insert"
     has_handler: bool = False
+    validation_path: str = ""
 
 
 class SkillsRegistry:
@@ -90,6 +91,11 @@ class SkillsRegistry:
 
             handler_path = os.path.join(skill_dir, "handler.py")
 
+            validation_path = ""
+            val_file = os.path.join(skill_dir, "VALIDATION.md")
+            if os.path.isfile(val_file):
+                validation_path = val_file
+
             self._skills[entry] = Skill(
                 name=entry,
                 description=description,
@@ -97,6 +103,7 @@ class SkillsRegistry:
                 content=content,
                 trigger=f"/{entry}",
                 has_handler=os.path.isfile(handler_path),
+                validation_path=validation_path,
             )
 
     def register(self, name: str, content: str, trigger: str = ""):
