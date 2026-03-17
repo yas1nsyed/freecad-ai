@@ -5,6 +5,8 @@ settings, choose metrics, and set advanced parameters before launching
 an optimization run.
 """
 
+import re
+
 from .compat import QtWidgets, QtCore
 
 QDialog = QtWidgets.QDialog
@@ -22,6 +24,7 @@ QLabel = QtWidgets.QLabel
 QListWidget = QtWidgets.QListWidget
 QMessageBox = QtWidgets.QMessageBox
 QFileDialog = QtWidgets.QFileDialog
+QWidget = QtWidgets.QWidget
 
 _tr = lambda text: QtCore.QCoreApplication.translate("OptimizeSkillDialog", text)
 
@@ -34,6 +37,11 @@ class OptimizeSkillDialog(QDialog):
         self.setWindowTitle(_tr("Optimize Skill"))
         self.setMinimumWidth(520)
         self._result_config = None
+        self._validation_content = ""
+        self._param_defs = {}
+        self._param_widgets = {}
+        self._param_layout = None
+        self._structured_widget = None
         self._build_ui(skills_list, preselect)
 
     # ---- UI construction ------------------------------------------------
@@ -50,6 +58,8 @@ class OptimizeSkillDialog(QDialog):
         skill_layout.addRow(_tr("Skill:"), self._skill_combo)
         layout.addLayout(skill_layout)
 
+        self._skill_combo.currentIndexChanged.connect(self._on_skill_changed)
+
         # -- Test Cases --
         tc_group = QGroupBox(_tr("Test Cases"))
         tc_layout = QVBoxLayout()
@@ -57,20 +67,56 @@ class OptimizeSkillDialog(QDialog):
         self._test_list = QListWidget()
         tc_layout.addWidget(self._test_list)
 
-        input_row = QHBoxLayout()
+        # Container for structured parameter fields (hidden by default)
+        self._structured_widget = QWidget()
+        self._param_layout = QFormLayout(self._structured_widget)
+        self._param_layout.setContentsMargins(0, 0, 0, 0)
+        self._structured_widget.setVisible(False)
+        tc_layout.addWidget(self._structured_widget)
+
+        # Quick-add row (shown when structured mode is active)
+        self._quick_add_row = QWidget()
+        quick_layout = QHBoxLayout(self._quick_add_row)
+        quick_layout.setContentsMargins(0, 0, 0, 0)
+        self._quick_add_input = QLineEdit()
+        self._quick_add_input.setPlaceholderText(
+            _tr("Quick add: L=100, W=80, H=40, T=2")
+        )
+        quick_layout.addWidget(self._quick_add_input)
+        quick_add_btn = QPushButton(_tr("Add"))
+        quick_add_btn.clicked.connect(self._quick_add_test_case)
+        quick_layout.addWidget(quick_add_btn)
+        self._quick_add_row.setVisible(False)
+        tc_layout.addWidget(self._quick_add_row)
+
+        # Plain text input row (shown when no VALIDATION.md)
+        self._plain_input_row = QWidget()
+        input_layout = QHBoxLayout(self._plain_input_row)
+        input_layout.setContentsMargins(0, 0, 0, 0)
         self._test_input = QLineEdit()
         self._test_input.setPlaceholderText(_tr("Enter test case arguments..."))
-        input_row.addWidget(self._test_input)
+        input_layout.addWidget(self._test_input)
 
         add_btn = QPushButton(_tr("Add"))
         add_btn.clicked.connect(self._add_test_case)
-        input_row.addWidget(add_btn)
+        input_layout.addWidget(add_btn)
 
+        tc_layout.addWidget(self._plain_input_row)
+
+        # Remove button (always visible)
+        remove_row = QHBoxLayout()
+        remove_row.addStretch()
         remove_btn = QPushButton(_tr("Remove"))
         remove_btn.clicked.connect(self._remove_test_case)
-        input_row.addWidget(remove_btn)
+        remove_row.addWidget(remove_btn)
+        tc_layout.addLayout(remove_row)
 
-        tc_layout.addLayout(input_row)
+        # Structured "Add Test Case" button (shown in structured mode)
+        self._structured_add_btn = QPushButton(_tr("Add Test Case"))
+        self._structured_add_btn.clicked.connect(self._add_structured_test_case)
+        self._structured_add_btn.setVisible(False)
+        tc_layout.addWidget(self._structured_add_btn)
+
         tc_group.setLayout(tc_layout)
         layout.addWidget(tc_group)
 
@@ -108,7 +154,7 @@ class OptimizeSkillDialog(QDialog):
         for name, label, default in [
             ("completion", _tr("Completion"), True),
             ("error_rate", _tr("Error rate"), True),
-            ("geometric_checks", _tr("Geometric checks"), True),
+            ("correctness", _tr("Correctness (geometry validation)"), True),
             ("efficiency", _tr("Efficiency"), True),
             ("visual_similarity", _tr("Visual similarity"), False),
         ]:
@@ -194,6 +240,212 @@ class OptimizeSkillDialog(QDialog):
 
         layout.addLayout(btn_row)
 
+    # ---- Structured parameter fields ------------------------------------
+
+    def _on_skill_changed(self, index):
+        """Update test case UI when skill selection changes."""
+        skill_name = self._skill_combo.currentText()
+        self._clear_param_fields()
+        self._validation_content = ""
+        self._param_defs = {}
+
+        try:
+            from freecad_ai.extensions.skills import SkillsRegistry
+            registry = SkillsRegistry()
+            skill = registry.get_skill(skill_name)
+            if skill and skill.validation_path:
+                with open(skill.validation_path) as f:
+                    content = f.read()
+                from freecad_ai.extensions.skill_validator import parse_validation_md
+                param_defs, rules = parse_validation_md(content)
+                if param_defs:
+                    self._param_defs = param_defs
+                    self._validation_content = content
+                    self._build_param_fields(param_defs, rules)
+                    return
+        except Exception:
+            pass
+
+    def _extract_str_values(self, param_name, rules):
+        """Extract possible string values for a param from 'when' conditions."""
+        values = set()
+        for rule in rules:
+            if not rule.condition:
+                continue
+            # Parse conditions like: lid_type == "screw"
+            m = re.match(
+                r'(\w+)\s*==\s*["\']([^"\']+)["\']',
+                rule.condition.strip(),
+            )
+            if m and m.group(1) == param_name:
+                values.add(m.group(2))
+        return sorted(values)
+
+    def _build_param_fields(self, param_defs, rules):
+        """Create structured input widgets for each parameter."""
+        self._param_widgets = {}
+
+        for name, pdef in param_defs.items():
+            if pdef.type == "float":
+                widget = QDoubleSpinBox()
+                widget.setRange(0, 10000)
+                widget.setDecimals(2)
+                if pdef.default is not None:
+                    widget.setValue(float(pdef.default))
+            elif pdef.type == "int":
+                widget = QSpinBox()
+                widget.setRange(0, 10000)
+                if pdef.default is not None:
+                    widget.setValue(int(pdef.default))
+            elif pdef.type == "str":
+                # Check if this param appears in 'when' conditions
+                possible_values = self._extract_str_values(name, rules)
+                if possible_values:
+                    widget = QComboBox()
+                    widget.addItems(possible_values)
+                    if pdef.default is not None and pdef.default in possible_values:
+                        widget.setCurrentIndex(possible_values.index(pdef.default))
+                else:
+                    widget = QLineEdit()
+                    if pdef.default is not None:
+                        widget.setText(str(pdef.default))
+            elif pdef.type == "bool":
+                widget = QCheckBox()
+                if pdef.default is not None:
+                    widget.setChecked(bool(pdef.default))
+            else:
+                widget = QLineEdit()
+                if pdef.default is not None:
+                    widget.setText(str(pdef.default))
+
+            self._param_layout.addRow(QLabel(name + ":"), widget)
+            self._param_widgets[name] = widget
+
+        # Build quick-add placeholder from param names/defaults
+        parts = []
+        for name, pdef in param_defs.items():
+            if pdef.default is not None:
+                parts.append(f"{name}={pdef.default}")
+            else:
+                parts.append(name)
+        self._quick_add_input.setPlaceholderText(", ".join(parts))
+
+        # Show structured UI, hide plain text
+        self._structured_widget.setVisible(True)
+        self._structured_add_btn.setVisible(True)
+        self._quick_add_row.setVisible(True)
+        self._plain_input_row.setVisible(False)
+
+    def _clear_param_fields(self):
+        """Remove all dynamically created param widgets."""
+        self._param_widgets = {}
+        # Clear the form layout
+        if self._param_layout is not None:
+            while self._param_layout.count():
+                item = self._param_layout.takeAt(0)
+                w = item.widget()
+                if w:
+                    w.deleteLater()
+
+        # Hide structured UI, show plain text
+        if self._structured_widget is not None:
+            self._structured_widget.setVisible(False)
+        if self._structured_add_btn is not None:
+            self._structured_add_btn.setVisible(False)
+        if self._quick_add_row is not None:
+            self._quick_add_row.setVisible(False)
+        if self._plain_input_row is not None:
+            self._plain_input_row.setVisible(True)
+
+    def _read_param_values(self):
+        """Read current values from structured param widgets into a dict."""
+        params = {}
+        for name, widget in self._param_widgets.items():
+            pdef = self._param_defs.get(name)
+            if isinstance(widget, QDoubleSpinBox):
+                params[name] = widget.value()
+            elif isinstance(widget, QSpinBox):
+                params[name] = widget.value()
+            elif isinstance(widget, QComboBox):
+                params[name] = widget.currentText()
+            elif isinstance(widget, QCheckBox):
+                params[name] = widget.isChecked()
+            elif isinstance(widget, QLineEdit):
+                val = widget.text().strip()
+                # Try to coerce to the declared type
+                if pdef and pdef.type == "float":
+                    try:
+                        val = float(val)
+                    except ValueError:
+                        pass
+                elif pdef and pdef.type == "int":
+                    try:
+                        val = int(val)
+                    except ValueError:
+                        pass
+                params[name] = val
+        return params
+
+    def _format_params_str(self, params):
+        """Format a params dict as a display string like 'L=100, W=80'."""
+        parts = []
+        for name, value in params.items():
+            parts.append(f"{name}={value}")
+        return ", ".join(parts)
+
+    def _add_structured_test_case(self):
+        """Add a test case from the structured parameter widgets."""
+        params = self._read_param_values()
+        display = self._format_params_str(params)
+        if display:
+            from .compat import QtWidgets as _Qw
+            item = _Qw.QListWidgetItem(display)
+            item.setData(QtCore.Qt.UserRole, params)
+            self._test_list.addItem(item)
+
+    def _quick_add_test_case(self):
+        """Parse quick-add text and add a test case."""
+        text = self._quick_add_input.text().strip()
+        if not text:
+            return
+
+        # Start from defaults
+        params = {}
+        for name, pdef in self._param_defs.items():
+            if pdef.default is not None:
+                params[name] = pdef.default
+
+        # Parse overrides: "L=100, W=80, lid_type=screw"
+        for part in text.split(","):
+            part = part.strip()
+            if "=" in part:
+                key, val = part.split("=", 1)
+                key = key.strip()
+                val = val.strip()
+                pdef = self._param_defs.get(key)
+                if pdef:
+                    if pdef.type == "float":
+                        try:
+                            val = float(val)
+                        except ValueError:
+                            pass
+                    elif pdef.type == "int":
+                        try:
+                            val = int(val)
+                        except ValueError:
+                            pass
+                    elif pdef.type == "bool":
+                        val = val.lower() in ("true", "1", "yes")
+                params[key] = val
+
+        display = self._format_params_str(params)
+        if display:
+            from .compat import QtWidgets as _Qw
+            item = _Qw.QListWidgetItem(display)
+            item.setData(QtCore.Qt.UserRole, params)
+            self._test_list.addItem(item)
+            self._quick_add_input.clear()
+
     # ---- Slots ----------------------------------------------------------
 
     def _add_test_case(self):
@@ -271,7 +523,12 @@ class OptimizeSkillDialog(QDialog):
 
         test_cases = []
         for i in range(self._test_list.count()):
-            test_cases.append({"args": self._test_list.item(i).text()})
+            item = self._test_list.item(i)
+            tc = {"args": item.text()}
+            params = item.data(QtCore.Qt.UserRole)
+            if params:
+                tc["params"] = params
+            test_cases.append(tc)
 
         metrics = [
             name for name, cb in self._metric_checks.items() if cb.isChecked()
