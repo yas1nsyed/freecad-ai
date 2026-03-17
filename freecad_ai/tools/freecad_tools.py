@@ -2741,6 +2741,43 @@ def _find_body_for(doc, obj):
     return None
 
 
+# ── report_skill_params ────────────────────────────────────
+
+_reported_skill_params = None
+
+
+def get_reported_skill_params():
+    """Get the last reported skill params, or None."""
+    return _reported_skill_params
+
+
+def clear_reported_skill_params():
+    """Clear stored skill params."""
+    global _reported_skill_params
+    _reported_skill_params = None
+
+
+def _handle_report_skill_params(params: dict) -> ToolResult:
+    """Store skill parameters for validation."""
+    global _reported_skill_params
+    _reported_skill_params = dict(params)
+    return ToolResult(
+        success=True,
+        output=f"Skill parameters recorded: {', '.join(f'{k}={v}' for k, v in params.items())}",
+    )
+
+
+REPORT_SKILL_PARAMS = ToolDefinition(
+    name="report_skill_params",
+    description="Report the parameters used for the current skill execution. Call this after completing a skill so the system can validate the result.",
+    parameters=[
+        ToolParam("params", "object", "Dict of parameter names and values used (e.g., {\"L\": 100, \"W\": 80})", required=True),
+    ],
+    handler=_handle_report_skill_params,
+    category="query",
+)
+
+
 # ── All tools ───────────────────────────────────────────────
 
 ALL_TOOLS = [
@@ -2776,5 +2813,6 @@ ALL_TOOLS = [
     CAPTURE_VIEWPORT,
     SET_VIEW,
     ZOOM_OBJECT,
+    REPORT_SKILL_PARAMS,
     SELECT_GEOMETRY,
 ]
