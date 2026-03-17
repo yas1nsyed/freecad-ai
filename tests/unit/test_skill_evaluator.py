@@ -1,7 +1,7 @@
 """Tests for skill evaluation framework."""
 import json
 import os
-from freecad_ai.extensions.skill_evaluator import EvalResult, OptimizationState, compute_composite_score
+from freecad_ai.extensions.skill_evaluator import EvalResult, OptimizationState, compute_composite_score, _score_single
 
 
 class TestEvalResult:
@@ -165,6 +165,38 @@ class TestScoring:
         config = {"metrics": ["completion"], "weights": {"completion": 1.0}, "budget": 30}
         score = compute_composite_score(results, config)
         assert abs(score - 0.5) < 0.01
+
+
+class TestScoringWithValidation:
+    def test_correctness_from_pass_rate(self):
+        """When measurements has pass_rate, correctness metric fires."""
+        result = EvalResult(
+            test_case="test",
+            completed=True,
+            tool_calls=10,
+            errors=0,
+            measurements={"pass_rate": 0.5},
+        )
+        config = {"metrics": ["completion", "correctness"],
+                  "weights": {"completion": 0.15, "correctness": 0.45},
+                  "budget": 30}
+        score, weight = _score_single(result, config)
+        # completion=1.0*0.15 + correctness=0.5*0.45 = 0.375
+        # total_weight = 0.60
+        # score = 0.375 / 0.60 = 0.625
+        assert abs(score - 0.625) < 0.01
+
+    def test_correctness_disabled_without_pass_rate(self):
+        """Without pass_rate, correctness metric doesn't fire."""
+        result = EvalResult(
+            test_case="test", completed=True, tool_calls=10, errors=1,
+        )
+        config = {"metrics": ["completion", "error_rate", "correctness"],
+                  "budget": 30}
+        score, weight = _score_single(result, config)
+        # correctness should not contribute — no pass_rate in measurements
+        # Only completion (0.30) + error_rate (0.25) active
+        assert abs(weight - 0.55) < 0.01
 
 
 from unittest.mock import MagicMock

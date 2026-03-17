@@ -129,6 +129,15 @@ DEFAULT_WEIGHTS = {
     "visual":      0.05,
 }
 
+VALIDATED_WEIGHTS = {
+    "completion":  0.15,
+    "error_rate":  0.15,
+    "correctness": 0.45,
+    "efficiency":  0.10,
+    "retries":     0.10,
+    "visual":      0.05,
+}
+
 
 def _score_single(result: EvalResult, config: dict) -> tuple[float, float]:
     """Score a single test case. Returns (score, total_weight)."""
@@ -166,7 +175,10 @@ def _score_single(result: EvalResult, config: dict) -> tuple[float, float]:
         scores["efficiency"] = 1.0 - min(result.tool_calls / budget, 1.0)
         active_weights["efficiency"] = weights.get("efficiency", 0.10)
 
-    if "correctness" in metrics and expected_bbox and result.measurements.get("bbox"):
+    if "correctness" in metrics and result.measurements.get("pass_rate") is not None:
+        scores["correctness"] = result.measurements["pass_rate"]
+        active_weights["correctness"] = weights.get("correctness", 0.20)
+    elif "correctness" in metrics and expected_bbox and result.measurements.get("bbox"):
         actual = result.measurements["bbox"]
         if len(actual) == len(expected_bbox) and all(e > 0 for e in expected_bbox):
             diffs = [abs(a - e) / e for a, e in zip(actual, expected_bbox)]
