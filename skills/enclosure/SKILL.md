@@ -98,4 +98,4 @@ for obj in App.ActiveDocument.Objects:
 - **Screw lid** (default): do steps 4, 5, 7. Skip step 9. Use screw lid variant in step 6.
 - **Press-fit lid**: skip steps 4, 5, 7, 9. Use press-fit/snap-fit lid variant in step 6 (lip only, no tabs).
 - **Snap-fit lid**: skip steps 4, 5, 7. Use press-fit/snap-fit lid variant in step 6, then do step 9 (ridge + tabs).
-- After completing ALL construction steps (including positioning), call `report_skill_params` with the parameters used: L, W, H, T, PR (for screw), and lid_type.
+- After completing ALL construction steps (including positioning), call the `report_skill_params` **tool** (NOT execute_code) with params={"L": value, "W": value, "H": value, "T": value, "PR": value, "lid_type": "screw/press-fit/snap-fit"}.

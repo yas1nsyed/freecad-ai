@@ -449,6 +449,32 @@ class TestRunChecks:
         assert results[0].passed is True
         assert "skipped" not in results[0].message.lower()
 
+    def test_bbox_position_pass(self):
+        shape = _mock_shape()
+        shape.BoundBox.ZMin = 40.0
+        shape.BoundBox.ZMax = 42.0
+        obj = SimpleNamespace(Shape=shape, Label="Lid", Name="Lid")
+        doc = _mock_doc({"Lid": obj})
+        rules = [ValidationRule(
+            target="Lid", check="bbox_position", expected="H, H+T",
+            tolerance=0.5)]
+        results = run_checks(doc, {"H": 40, "T": 2}, rules)
+        assert results[0].passed is True
+
+    def test_bbox_position_fail_upside_down(self):
+        """Catches an upside-down lid (Z position wrong)."""
+        shape = _mock_shape()
+        shape.BoundBox.ZMin = 0.0   # lid at Z=0 instead of Z=40
+        shape.BoundBox.ZMax = 2.0
+        obj = SimpleNamespace(Shape=shape, Label="Lid", Name="Lid")
+        doc = _mock_doc({"Lid": obj})
+        rules = [ValidationRule(
+            target="Lid", check="bbox_position", expected="H, H+T",
+            tolerance=0.5)]
+        results = run_checks(doc, {"H": 40, "T": 2}, rules)
+        assert results[0].passed is False
+        assert "0.0" in results[0].message
+
     def test_unknown_check_type(self):
         shape = _mock_shape()
         obj = SimpleNamespace(Shape=shape, Label="Box", Name="Box")

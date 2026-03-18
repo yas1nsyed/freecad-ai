@@ -16,6 +16,7 @@ lid_type: str = screw
 ### EnclosureBase
 - exists: true
 - bbox: L, W, H (tolerance 0.5)
+- bbox_position: 0, H (tolerance 0.5)
 - solid_count: 1
 - valid_solid: true
 
@@ -36,10 +37,13 @@ lid_type: str = screw
 
 #### when lid_type == "screw"
 - bbox: L, W, T (tolerance 0.5)
+- bbox_position: H, H+T (tolerance 0.5)
 - has_holes: 4
 
 #### when lid_type == "press-fit"
 - bbox: L, W, T+3 (tolerance 0.5)
+- bbox_position: H-3, H+T (tolerance 0.5)
 
 #### when lid_type == "snap-fit"
 - bbox: L, W, T+3 (tolerance 0.5)
+- bbox_position: H-3, H+T (tolerance 0.5)

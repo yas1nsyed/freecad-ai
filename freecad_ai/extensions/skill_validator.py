@@ -463,6 +463,35 @@ def _run_single_check(
             message=f"BBox expected {expected_dims}, got {actual_dims}",
         )
 
+    if check == "bbox_position":
+        # Expected: "zmin_expr, zmax_expr" — check absolute Z position
+        parts = [p.strip() for p in rule.expected.split(",")]
+        if len(parts) != 2:
+            return CheckResult(
+                target=target,
+                check=check,
+                passed=False,
+                expected=rule.expected,
+                actual=None,
+                message="bbox_position requires 2 values: zmin, zmax",
+            )
+        expected_zmin = _eval_expected(parts[0], num_params)
+        expected_zmax = _eval_expected(parts[1], num_params)
+        bbox = obj.Shape.BoundBox
+        tol = rule.tolerance or 0.5
+        zmin_ok = _compare_value(bbox.ZMin, expected_zmin, tol, "absolute")
+        zmax_ok = _compare_value(bbox.ZMax, expected_zmax, tol, "absolute")
+        passed = zmin_ok and zmax_ok
+        return CheckResult(
+            target=target,
+            check=check,
+            passed=passed,
+            expected=f"Z[{expected_zmin:.1f}, {expected_zmax:.1f}]",
+            actual=f"Z[{bbox.ZMin:.1f}, {bbox.ZMax:.1f}]",
+            message=f"Position expected Z[{expected_zmin:.1f}, {expected_zmax:.1f}], "
+                    f"got Z[{bbox.ZMin:.1f}, {bbox.ZMax:.1f}]",
+        )
+
     if check == "volume":
         expected_val = _eval_expected(rule.expected, num_params)
         actual_val = obj.Shape.Volume
