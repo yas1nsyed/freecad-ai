@@ -43,7 +43,9 @@ lid_type: str = screw
 #### when lid_type == "press-fit"
 - bbox: L, W, T+3 (tolerance 0.5)
 - bbox_position: H-3, H+T (tolerance 0.5)
+- section_area: Z, H-1, (L-2*T-0.4)*(W-2*T-0.4) (tolerance 10%)
 
 #### when lid_type == "snap-fit"
 - bbox: L, W, T+3 (tolerance 0.5)
 - bbox_position: H-3, H+T (tolerance 0.5)
+- section_area: Z, H-1, (L-2*T-2)*(W-2*T-2) (tolerance 10%)

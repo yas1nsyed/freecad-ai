@@ -505,6 +505,68 @@ def _run_single_check(
             message=f"Volume expected {expected_val}, got {actual_val}",
         )
 
+    if check == "section_area":
+        # Expected: "axis, offset_expr, area_expr"
+        # axis: X, Y, or Z (case-insensitive)
+        # offset_expr: where to slice (expression using params)
+        # area_expr: expected cross-section area (expression using params)
+        parts = [p.strip() for p in rule.expected.split(",")]
+        if len(parts) != 3:
+            return CheckResult(
+                target=target,
+                check=check,
+                passed=False,
+                expected=rule.expected,
+                actual=None,
+                message="section_area requires 3 values: axis, offset, area",
+            )
+        axis_name = parts[0].upper()
+        axis_map = {"X": (1, 0, 0), "Y": (0, 1, 0), "Z": (0, 0, 1)}
+        if axis_name not in axis_map:
+            return CheckResult(
+                target=target,
+                check=check,
+                passed=False,
+                expected=rule.expected,
+                actual=None,
+                message=f"section_area axis must be X, Y, or Z, got '{parts[0]}'",
+            )
+        offset = _eval_expected(parts[1], num_params)
+        expected_area = _eval_expected(parts[2], num_params)
+        try:
+            try:
+                import FreeCAD
+                import Part
+            except ImportError:
+                return CheckResult(
+                    target=target, check=check, passed=False,
+                    expected=str(expected_area), actual="FreeCAD not available",
+                    message="section_area: FreeCAD not available",
+                )
+            direction = FreeCAD.Vector(*axis_map[axis_name])
+            wires = obj.Shape.slice(direction, offset)
+            if wires:
+                face = Part.Face(wires)
+                actual_area = face.Area
+            else:
+                actual_area = 0.0
+        except Exception as e:
+            # slice can fail if offset is outside shape or geometry is complex
+            actual_area = 0.0
+            logger.warning("section_area slice failed for %s at %s=%s: %s",
+                           target, axis_name, offset, e)
+        passed = _compare_value(
+            actual_area, expected_area, rule.tolerance, rule.tolerance_type)
+        return CheckResult(
+            target=target,
+            check=check,
+            passed=passed,
+            expected=f"{expected_area:.1f}",
+            actual=f"{actual_area:.1f}",
+            message=f"Section area at {axis_name}={offset:.1f}: "
+                    f"expected {expected_area:.1f}, got {actual_area:.1f}",
+        )
+
     if check == "solid_count":
         expected_val = int(_eval_expected(rule.expected, num_params))
         actual_val = len(obj.Shape.Solids)

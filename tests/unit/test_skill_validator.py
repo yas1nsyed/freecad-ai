@@ -475,6 +475,68 @@ class TestRunChecks:
         assert results[0].passed is False
         assert "0.0" in results[0].message
 
+    def test_section_area_pass(self):
+        """Section area check with matching area."""
+        import sys
+        mock_freecad = SimpleNamespace(
+            Vector=lambda x, y, z: (x, y, z))
+        # (L-2*T-0.4)*(W-2*T-0.4) = (100-4-0.4)*(80-4-0.4) = 95.6*75.6 = 7227.36
+        mock_face = SimpleNamespace(Area=7200.0)  # within 10% tolerance
+        mock_part = SimpleNamespace(
+            Face=lambda wires: mock_face)
+        sys.modules["FreeCAD"] = mock_freecad
+        sys.modules["Part"] = mock_part
+        try:
+            shape = _mock_shape()
+            wire = SimpleNamespace()
+            shape.slice = lambda direction, offset: [wire]
+            obj = SimpleNamespace(Shape=shape, Label="Lid", Name="Lid")
+            doc = _mock_doc({"Lid": obj})
+            rules = [ValidationRule(
+                target="Lid", check="section_area",
+                expected="Z, H-1, (L-2*T-0.4)*(W-2*T-0.4)",
+                tolerance=10.0, tolerance_type="relative")]
+            results = run_checks(doc, {"H": 40, "L": 100, "W": 80, "T": 2}, rules)
+            assert results[0].passed is True
+        finally:
+            sys.modules.pop("FreeCAD", None)
+            sys.modules.pop("Part", None)
+
+    def test_section_area_fail_no_material(self):
+        """Section area zero when lid is flipped (no material at expected Z)."""
+        import sys
+        mock_freecad = SimpleNamespace(
+            Vector=lambda x, y, z: (x, y, z))
+        mock_part = SimpleNamespace(Face=lambda wires: None)
+        sys.modules["FreeCAD"] = mock_freecad
+        sys.modules["Part"] = mock_part
+        try:
+            shape = _mock_shape()
+            shape.slice = lambda direction, offset: []  # no wires = no material
+            obj = SimpleNamespace(Shape=shape, Label="Lid", Name="Lid")
+            doc = _mock_doc({"Lid": obj})
+            rules = [ValidationRule(
+                target="Lid", check="section_area",
+                expected="Z, H-1, (L-2*T-0.4)*(W-2*T-0.4)",
+                tolerance=10.0, tolerance_type="relative")]
+            results = run_checks(doc, {"H": 40, "L": 100, "W": 80, "T": 2}, rules)
+            assert results[0].passed is False
+            assert "0.0" in results[0].message
+        finally:
+            sys.modules.pop("FreeCAD", None)
+            sys.modules.pop("Part", None)
+
+    def test_section_area_bad_axis(self):
+        shape = _mock_shape()
+        obj = SimpleNamespace(Shape=shape, Label="Box", Name="Box")
+        doc = _mock_doc({"Box": obj})
+        rules = [ValidationRule(
+            target="Box", check="section_area",
+            expected="W, 10, 100")]
+        results = run_checks(doc, {}, rules)
+        assert results[0].passed is False
+        assert "axis" in results[0].message.lower()
+
     def test_unknown_check_type(self):
         shape = _mock_shape()
         obj = SimpleNamespace(Shape=shape, Label="Box", Name="Box")
