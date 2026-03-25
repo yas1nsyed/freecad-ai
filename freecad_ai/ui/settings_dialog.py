@@ -1,7 +1,9 @@
 """Settings dialog for FreeCAD AI.
 
 Provides a GUI for configuring:
-  - LLM provider (Anthropic, OpenAI, Ollama, Gemini, OpenRouter, Custom)
+  - LLM provider (Anthropic, OpenAI, Ollama, Gemini, OpenRouter, Moonshot,
+    DeepSeek, Qwen, Groq, Mistral, Together, Fireworks, xAI, Cohere,
+    SambaNova, MiniMax, Custom)
   - API key, base URL, model name
   - Max tokens, temperature
   - Auto-execute toggle
@@ -97,7 +99,7 @@ class SettingsDialog(QDialog):
 
         self.api_key_edit = QLineEdit()
         self.api_key_edit.setEchoMode(QLineEdit.Password)
-        self.api_key_edit.setPlaceholderText(translate("SettingsDialog", "Enter API key (stored in plaintext)"))
+        self.api_key_edit.setPlaceholderText(translate("SettingsDialog", "API key, file:/path/to/token, or cmd:command"))
         provider_layout.addRow(translate("SettingsDialog", "API Key:"), self.api_key_edit)
 
         self.base_url_edit = QLineEdit()

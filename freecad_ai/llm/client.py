@@ -9,12 +9,17 @@ Both streaming and non-streaming modes are supported, with optional tool calling
 
 import base64
 import json
+import logging
+import os
 import random
 import ssl
+import subprocess
 import urllib.request
 import urllib.error
 from dataclasses import dataclass, field
 from typing import Generator
+
+logger = logging.getLogger(__name__)
 
 from .providers import get_api_style
 
@@ -129,6 +134,55 @@ class LLMClient:
         # SSL context for HTTPS requests
         self._ssl_ctx = ssl.create_default_context()
 
+    # ── API key resolution ─────────────────────────────────────
+
+    def _resolve_api_key(self) -> str:
+        """Resolve the API key, supporting file: and cmd: prefixes.
+
+        - ``file:/path/to/token`` — reads token from file (re-read each call)
+        - ``cmd:some command``    — runs command, uses stdout as token
+        - anything else           — used as-is (literal key)
+        """
+        key = self.api_key
+        if not key:
+            return ""
+
+        if key.startswith("file:"):
+            path = os.path.expanduser(key[5:].strip())
+            try:
+                with open(path) as f:
+                    token = f.read().strip()
+                if not token:
+                    logger.warning("Token file '%s' is empty", path)
+                return token
+            except OSError as e:
+                logger.error("Failed to read token file '%s': %s", path, e)
+                return ""
+
+        if key.startswith("cmd:"):
+            command = key[4:].strip()
+            try:
+                result = subprocess.run(
+                    command, shell=True, capture_output=True, text=True,
+                    timeout=10,
+                )
+                if result.returncode != 0:
+                    logger.error("Token command failed (rc=%d): %s",
+                                 result.returncode, result.stderr.strip())
+                    return ""
+                token = result.stdout.strip()
+                if not token:
+                    logger.warning("Token command produced empty output")
+                return token
+            except subprocess.TimeoutExpired:
+                logger.error("Token command timed out after 10s: %s", command)
+                return ""
+            except OSError as e:
+                logger.error("Failed to run token command: %s", e)
+                return ""
+
+        return key
+
     # ── Public API ──────────────────────────────────────────────
 
     def send(self, messages: list[dict], system: str = "") -> str:
@@ -224,8 +278,9 @@ class LLMClient:
         headers = {
             "Content-Type": "application/json",
         }
-        if self.api_key:
-            headers["Authorization"] = f"Bearer {self.api_key}"
+        resolved_key = self._resolve_api_key()
+        if resolved_key:
+            headers["Authorization"] = f"Bearer {resolved_key}"
         return headers
 
     def _openai_body(self, messages: list[dict], system: str, stream: bool,
@@ -252,6 +307,7 @@ class LLMClient:
         }
         if tools:
             body["tools"] = tools
+            body["tool_choice"] = "auto"
         # OpenAI reasoning models (o1, o3, etc.)
         elif self.thinking != "off":
             effort_map = {"on": "medium", "extended": "high"}
@@ -287,7 +343,7 @@ class LLMClient:
                     arguments=args,
                 ))
 
-            stop_reason = "tool_use" if finish == "tool_calls" else "end_turn"
+            stop_reason = "tool_use" if (finish == "tool_calls" or tool_calls) else "end_turn"
             return LLMResponse(text=text, tool_calls=tool_calls, stop_reason=stop_reason)
         except (KeyError, IndexError, json.JSONDecodeError) as e:
             raise LLMError(f"Unexpected response format: {e}\n{json.dumps(data, indent=2)}")
@@ -359,20 +415,21 @@ class LLMClient:
                         pt["arguments_json"] += arg_chunk
                         yield LLMStreamEvent(type="tool_call_delta", argument_delta=arg_chunk)
 
-                # Finish
-                if finish == "tool_calls":
-                    for idx, pt in sorted(pending_tools.items()):
-                        try:
-                            args = json.loads(pt["arguments_json"]) if pt["arguments_json"] else {}
-                        except json.JSONDecodeError:
-                            args = {}
-                        yield LLMStreamEvent(
-                            type="tool_call_end",
-                            tool_call=ToolCall(id=pt["id"], name=pt["name"], arguments=args),
-                        )
-                    yield LLMStreamEvent(type="done")
-                    return
-                elif finish == "stop":
+                # Finish — emit any pending tool calls regardless of
+                # finish_reason, because some providers (e.g. Moonshot/Kimi)
+                # return "stop" instead of "tool_calls" even when the
+                # response contains tool calls.
+                if finish in ("tool_calls", "stop"):
+                    if pending_tools:
+                        for idx, pt in sorted(pending_tools.items()):
+                            try:
+                                args = json.loads(pt["arguments_json"]) if pt["arguments_json"] else {}
+                            except json.JSONDecodeError:
+                                args = {}
+                            yield LLMStreamEvent(
+                                type="tool_call_end",
+                                tool_call=ToolCall(id=pt["id"], name=pt["name"], arguments=args),
+                            )
                     yield LLMStreamEvent(type="done")
                     return
 
@@ -417,7 +474,7 @@ class LLMClient:
     def _anthropic_headers(self) -> dict:
         headers = {
             "Content-Type": "application/json",
-            "x-api-key": self.api_key,
+            "x-api-key": self._resolve_api_key(),
             "anthropic-version": ANTHROPIC_API_VERSION,
         }
         if self.thinking != "off":
