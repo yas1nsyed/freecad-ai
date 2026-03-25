@@ -125,6 +125,7 @@ class _LLMWorker(QThread):
 
         for turn in range(self._max_tool_turns):
             text_parts = []
+            thinking_parts = []
             tool_calls = []
 
             # Stream with tools
@@ -136,6 +137,7 @@ class _LLMWorker(QThread):
                     self._full_response += event.text
                     self.token_received.emit(event.text)
                 elif event.type == "thinking_delta":
+                    thinking_parts.append(event.text)
                     self._thinking_text += event.text
                     self.thinking_received.emit(event.text)
                 elif event.type == "tool_call_start":
@@ -148,6 +150,7 @@ class _LLMWorker(QThread):
                     break
 
             turn_text = "".join(text_parts)
+            turn_thinking = "".join(thinking_parts)
 
             if not tool_calls:
                 # No tool calls — we're done
@@ -185,11 +188,16 @@ class _LLMWorker(QThread):
                     }
                     for tc in tool_calls
                 ]
-                messages.append({
+                assistant_msg = {
                     "role": "assistant",
                     "content": turn_text or None,
                     "tool_calls": oai_tcs,
-                })
+                }
+                # Preserve reasoning_content for providers that require it
+                # (e.g. Moonshot/Kimi-K2.5 with thinking enabled)
+                if turn_thinking:
+                    assistant_msg["reasoning_content"] = turn_thinking
+                messages.append(assistant_msg)
 
             # Execute each tool call on the main thread
             # Exception: optimize_iteration runs on worker thread (long-running
