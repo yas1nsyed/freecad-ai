@@ -1458,14 +1458,19 @@ def _handle_create_snap_tabs(
     protrusion: float = 0.5,
     label: str = "SnapTab",
 ) -> ToolResult:
-    """Add snap tabs on the outside of a rectangular lip that catch on an inner ridge."""
+    """Add snap tabs on the outside of a rectangular lip that catch on an inner ridge.
+
+    Creates PartDesign::AdditiveBox features inside the lid body so tabs
+    remain editable and compatible with PartDesign tools (fillet, chamfer,
+    pattern, etc.).
+    """
     import FreeCAD as App
-    import Part
 
     def do(doc):
         body = _get_object(doc, body_name)
         if not body:
-            return ToolResult(success=False, output="", error=f"Body '{body_name}' not found")
+            hint = _suggest_similar(doc, body_name, "Body")
+            return ToolResult(success=False, output="", error=f"Body '{body_name}' not found.{hint}")
 
         T = wall_thickness
         cl = clearance
@@ -1480,17 +1485,13 @@ def _handle_create_snap_tabs(
                       f"Need at least 0.5mm; got {cl}mm. "
                       f"Use a wider lip clearance for snap-fit lids.")
 
-        # body.Shape for PartDesign bodies already includes Placement,
-        # so tab boxes must be created in global coordinates to match.
-        ox = body.Placement.Base.x
-        oy = body.Placement.Base.y
-        oz = body.Placement.Base.z
-
-        # Lip outer dimensions (shifted to global coords)
-        lip_x1 = T + cl + ox
-        lip_x2 = length - T - cl + ox
-        lip_y1 = T + cl + oy
-        lip_y2 = width - T - cl + oy
+        # All positions are in body-local coordinates (AdditiveBox
+        # placement is relative to the body, not global).
+        # Lip outer edges
+        lip_x1 = T + cl
+        lip_x2 = length - T - cl
+        lip_y1 = T + cl
+        lip_y2 = width - T - cl
         lip_cx = (lip_x1 + lip_x2) / 2
         lip_cy = (lip_y1 + lip_y2) / 2
 
@@ -1498,74 +1499,48 @@ def _handle_create_snap_tabs(
         # Shorten tab by 0.3mm so it doesn't touch the ridge above.
         snap_gap = 0.3
         th = tab_height - snap_gap  # effective tab height
-        tab_z = th / 2 + oz
+        p = actual_protrusion
 
-        # Place 2 tabs on each long side, 1 on each short side
+        # Define tab positions: (x, y, z, sx, sy, sz, side_label)
+        # x/y/z = corner of the box (not center)
         tabs = []
+        third = (lip_x2 - lip_x1) / 3
 
         # Long sides (front y=lip_y1, back y=lip_y2) — 2 tabs each
-        p = actual_protrusion
-        third = (lip_x2 - lip_x1) / 3
-        for x_off in [lip_x1 + third, lip_x1 + 2 * third]:
+        for i, x_center in enumerate([lip_x1 + third, lip_x1 + 2 * third]):
             # Front wall tab: protrudes in -Y direction
-            tabs.append({
-                "x": x_off, "y": lip_y1, "z": tab_z,
-                "sx": tab_width, "sy": p, "sz": th,
-                "dy": -p,
-            })
+            tabs.append((
+                x_center - tab_width / 2, lip_y1 - p, 0,
+                tab_width, p, th, f"Front{i + 1}"))
             # Back wall tab: protrudes in +Y direction
-            tabs.append({
-                "x": x_off, "y": lip_y2, "z": tab_z,
-                "sx": tab_width, "sy": p, "sz": th,
-                "dy": 0,
-            })
+            tabs.append((
+                x_center - tab_width / 2, lip_y2, 0,
+                tab_width, p, th, f"Back{i + 1}"))
 
         # Short sides (left x=lip_x1, right x=lip_x2) — 1 tab each
-        # Left wall tab: protrudes in -X direction
-        tabs.append({
-            "x": lip_x1, "y": lip_cy, "z": tab_z,
-            "sx": p, "sy": tab_width, "sz": th,
-            "dx": -p,
-        })
-        # Right wall tab: protrudes in +X direction
-        tabs.append({
-            "x": lip_x2, "y": lip_cy, "z": tab_z,
-            "sx": p, "sy": tab_width, "sz": th,
-            "dx": 0,
-        })
+        tabs.append((
+            lip_x1 - p, lip_cy - tab_width / 2, 0,
+            p, tab_width, th, "Left"))
+        tabs.append((
+            lip_x2, lip_cy - tab_width / 2, 0,
+            p, tab_width, th, "Right"))
 
-        # Create tab shapes and fuse with body
-        body_shape = body.Shape.copy()
-        tab_count = 0
-        for t in tabs:
-            bx = t.get("dx", 0) + t["x"] - t["sx"] / 2
-            by = t.get("dy", 0) + t["y"] - t["sy"] / 2
-            bz = t["z"] - t["sz"] / 2
-            # Adjust: for wall-adjacent tabs, anchor to wall edge
-            if "dx" in t:
-                bx = t["x"] + t["dx"]
-            if "dy" in t:
-                by = t["y"] + t["dy"]
-
-            box = Part.makeBox(t["sx"], t["sy"], t["sz"],
-                               App.Vector(bx, by, bz))
-            body_shape = body_shape.fuse(box)
-            tab_count += 1
-
-        body_shape = body_shape.removeSplitter()
-
-        # Create a Part::Feature (shape is already in global coords)
-        tab_obj = doc.addObject("Part::Feature", label)
-        tab_obj.Label = label
-        tab_obj.Shape = body_shape
-
-        # Hide the original body — the tab object replaces its visual
-        body.Visibility = False
+        # Create each tab as an AdditiveBox inside the body
+        tab_names = []
+        for (bx, by, bz, sx, sy, sz, side) in tabs:
+            tab_label = f"{label}_{side}"
+            box = body.newObject("PartDesign::AdditiveBox", tab_label)
+            box.Length = sx
+            box.Width = sy
+            box.Height = sz
+            box.Placement.Base = App.Vector(bx, by, bz)
+            tab_names.append(box.Name)
 
         return ToolResult(
             success=True,
-            output=f"Added {tab_count} snap tabs to '{body_name}' (protrusion={actual_protrusion:.1f}mm). Result in '{label}'.",
-            data={"name": tab_obj.Name, "label": label, "tab_count": tab_count},
+            output=f"Added {len(tabs)} snap tabs to '{body_name}' (protrusion={actual_protrusion:.1f}mm) as PartDesign features.",
+            data={"name": tab_names[-1], "label": label, "tab_count": len(tabs),
+                  "tab_names": tab_names},
         )
 
     return _with_undo("Create Snap Tabs", do)
