@@ -156,9 +156,10 @@ def _handle_create_primitive(
         if body_name:
             body = _get_object(doc, body_name)
             if not body:
+                hint = _suggest_similar(doc, body_name, "Body")
                 return ToolResult(
                     success=False, output="",
-                    error=f"Body '{body_name}' not found"
+                    error=f"Body '{body_name}' not found.{hint}"
                 )
         else:
             body_label = label or st.capitalize()
@@ -236,7 +237,8 @@ def _handle_create_body(
         body.Label = label
         return ToolResult(
             success=True,
-            output=f"Created PartDesign body '{body.Label}' ({body.Name})",
+            output=(f"Created PartDesign body '{body.Name}' (label: '{body.Label}')."
+                    f" Use body_name='{body.Name}' in subsequent tool calls."),
             data={"name": body.Name, "label": body.Label},
         )
 
@@ -274,7 +276,8 @@ def _handle_create_sketch(
         if body_name:
             body = _get_object(doc, body_name)
             if not body:
-                return ToolResult(success=False, output="", error=f"Body '{body_name}' not found")
+                hint = _suggest_similar(doc, body_name, "Body")
+                return ToolResult(success=False, output="", error=f"Body '{body_name}' not found.{hint}")
 
         if body:
             sketch = body.newObject("Sketcher::SketchObject", label or "Sketch")
@@ -398,7 +401,8 @@ def _handle_create_sketch(
 
         return ToolResult(
             success=True,
-            output=f"Created sketch '{sketch.Label}' with {geo_count} geometries",
+            output=(f"Created sketch '{sketch.Name}' with {geo_count} geometries."
+                    f" Use sketch_name='{sketch.Name}' in pad_sketch/pocket_sketch."),
             data={"name": sketch.Name, "label": sketch.Label, "geometry_count": geo_count},
         )
 
@@ -445,14 +449,16 @@ def _handle_pad_sketch(
     def do(doc):
         sketch = _get_object(doc, sketch_name)
         if not sketch:
-            return ToolResult(success=False, output="", error=f"Sketch '{sketch_name}' not found")
+            hint = _suggest_similar(doc, sketch_name, "Sketcher")
+            return ToolResult(success=False, output="", error=f"Sketch '{sketch_name}' not found.{hint}")
 
         # Find the body — prefer explicit body_name, fall back to auto-detect
         body = None
         if body_name:
             body = _get_object(doc, body_name)
             if not body:
-                return ToolResult(success=False, output="", error=f"Body '{body_name}' not found")
+                hint = _suggest_similar(doc, body_name, "Body")
+                return ToolResult(success=False, output="", error=f"Body '{body_name}' not found.{hint}")
         else:
             body = _find_body_for(doc, sketch)
         if not body:
@@ -467,7 +473,7 @@ def _handle_pad_sketch(
 
         return ToolResult(
             success=True,
-            output=f"Padded sketch '{sketch_name}' by {length}mm",
+            output=f"Padded sketch '{sketch.Name}' by {length}mm (pad name: '{pad.Name}')",
             data={"name": pad.Name, "label": pad.Label, "length": length},
         )
 
@@ -503,13 +509,15 @@ def _handle_pocket_sketch(
     def do(doc):
         sketch = _get_object(doc, sketch_name)
         if not sketch:
-            return ToolResult(success=False, output="", error=f"Sketch '{sketch_name}' not found")
+            hint = _suggest_similar(doc, sketch_name, "Sketcher")
+            return ToolResult(success=False, output="", error=f"Sketch '{sketch_name}' not found.{hint}")
 
         body = None
         if body_name:
             body = _get_object(doc, body_name)
             if not body:
-                return ToolResult(success=False, output="", error=f"Body '{body_name}' not found")
+                hint = _suggest_similar(doc, body_name, "Body")
+                return ToolResult(success=False, output="", error=f"Body '{body_name}' not found.{hint}")
         else:
             body = _find_body_for(doc, sketch)
         if not body:
@@ -552,7 +560,7 @@ def _handle_pocket_sketch(
 
         return ToolResult(
             success=True,
-            output=f"Created pocket from sketch '{sketch_name}'",
+            output=f"Created pocket from sketch '{sketch.Name}' (pocket name: '{pocket.Name}')",
             data={"name": pocket.Name, "label": pocket.Label},
         )
 
@@ -594,13 +602,15 @@ def _handle_revolve_sketch(
     def do(doc):
         sketch = _get_object(doc, sketch_name)
         if not sketch:
-            return ToolResult(success=False, output="", error=f"Sketch '{sketch_name}' not found")
+            hint = _suggest_similar(doc, sketch_name, "Sketcher")
+            return ToolResult(success=False, output="", error=f"Sketch '{sketch_name}' not found.{hint}")
 
         body = None
         if body_name:
             body = _get_object(doc, body_name)
             if not body:
-                return ToolResult(success=False, output="", error=f"Body '{body_name}' not found")
+                hint = _suggest_similar(doc, body_name, "Body")
+                return ToolResult(success=False, output="", error=f"Body '{body_name}' not found.{hint}")
         else:
             body = _find_body_for(doc, sketch)
         if not body:
@@ -674,7 +684,8 @@ def _handle_loft_sketches(
         for name in section_names:
             s = _get_object(doc, name)
             if not s:
-                return ToolResult(success=False, output="", error=f"Section '{name}' not found")
+                hint = _suggest_similar(doc, name, "Sketcher")
+                return ToolResult(success=False, output="", error=f"Section '{name}' not found.{hint}")
             sections.append(s)
 
         # Find the body
@@ -682,7 +693,8 @@ def _handle_loft_sketches(
         if body_name:
             body = _get_object(doc, body_name)
             if not body:
-                return ToolResult(success=False, output="", error=f"Body '{body_name}' not found")
+                hint = _suggest_similar(doc, body_name, "Body")
+                return ToolResult(success=False, output="", error=f"Body '{body_name}' not found.{hint}")
         else:
             body = _find_body_for(doc, sections[0])
         if not body:
@@ -752,17 +764,20 @@ def _handle_sweep_sketch(
     def do(doc):
         profile = _get_object(doc, profile_name)
         if not profile:
-            return ToolResult(success=False, output="", error=f"Profile sketch '{profile_name}' not found")
+            hint = _suggest_similar(doc, profile_name, "Sketcher")
+            return ToolResult(success=False, output="", error=f"Profile sketch '{profile_name}' not found.{hint}")
 
         spine = _get_object(doc, spine_name)
         if not spine:
-            return ToolResult(success=False, output="", error=f"Spine sketch '{spine_name}' not found")
+            hint = _suggest_similar(doc, spine_name, "Sketcher")
+            return ToolResult(success=False, output="", error=f"Spine sketch '{spine_name}' not found.{hint}")
 
         body = None
         if body_name:
             body = _get_object(doc, body_name)
             if not body:
-                return ToolResult(success=False, output="", error=f"Body '{body_name}' not found")
+                hint = _suggest_similar(doc, body_name, "Body")
+                return ToolResult(success=False, output="", error=f"Body '{body_name}' not found.{hint}")
         else:
             body = _find_body_for(doc, profile)
         if not body:
@@ -824,9 +839,11 @@ def _handle_boolean_operation(
         obj1 = _get_object(doc, object1)
         obj2 = _get_object(doc, object2)
         if not obj1:
-            return ToolResult(success=False, output="", error=f"Object '{object1}' not found")
+            hint = _suggest_similar(doc, object1)
+            return ToolResult(success=False, output="", error=f"Object '{object1}' not found.{hint}")
         if not obj2:
-            return ToolResult(success=False, output="", error=f"Object '{object2}' not found")
+            hint = _suggest_similar(doc, object2)
+            return ToolResult(success=False, output="", error=f"Object '{object2}' not found.{hint}")
 
         op_map = {
             "fuse": "Part::Fuse",
@@ -886,7 +903,8 @@ def _handle_transform_object(
     def do(doc):
         obj = _get_object(doc, object_name)
         if not obj:
-            return ToolResult(success=False, output="", error=f"Object '{object_name}' not found")
+            hint = _suggest_similar(doc, object_name)
+            return ToolResult(success=False, output="", error=f"Object '{object_name}' not found.{hint}")
 
         placement = App.Placement(
             App.Vector(translate_x, translate_y, translate_z),
@@ -941,7 +959,8 @@ def _handle_fillet_edges(
     def do(doc):
         obj = _get_object(doc, object_name)
         if not obj:
-            return ToolResult(success=False, output="", error=f"Object '{object_name}' not found")
+            hint = _suggest_similar(doc, object_name)
+            return ToolResult(success=False, output="", error=f"Object '{object_name}' not found.{hint}")
 
         edge_refs = _coerce_str_list(edges) or ["Edge1"]
 
@@ -995,7 +1014,8 @@ def _handle_chamfer_edges(
     def do(doc):
         obj = _get_object(doc, object_name)
         if not obj:
-            return ToolResult(success=False, output="", error=f"Object '{object_name}' not found")
+            hint = _suggest_similar(doc, object_name)
+            return ToolResult(success=False, output="", error=f"Object '{object_name}' not found.{hint}")
 
         edge_refs = _coerce_str_list(edges) or ["Edge1"]
 
@@ -2718,6 +2738,11 @@ def _get_object(doc, name_or_label):
 
     FreeCAD may assign different internal Names than requested (e.g., "Body"
     instead of "EnclosureBase"), so we fall back to Label matching.
+
+    Also handles common LLM naming mistakes:
+      - "Sketch0" → "Sketch" (first object has no numeric suffix)
+      - "Sketch1" → "Sketch001" (FreeCAD uses zero-padded 3-digit suffixes)
+      - "Body0" → "Body", "Body1" → "Body001", etc.
     """
     obj = doc.getObject(name_or_label)
     if obj:
@@ -2726,7 +2751,73 @@ def _get_object(doc, name_or_label):
     for o in doc.Objects:
         if o.Label == name_or_label:
             return o
+
+    # Try common LLM naming variants (e.g. "Sketch0" → "Sketch",
+    # "Sketch1" → "Sketch001", "Pad2" → "Pad002")
+    import re
+    m = re.match(r'^(.+?)(\d+)$', name_or_label)
+    if m:
+        base, num_str = m.group(1), m.group(2)
+        num = int(num_str)
+        variants = []
+        if num == 0:
+            # "Sketch0" → try "Sketch" (first object has no suffix)
+            variants.append(base)
+        else:
+            # "Sketch1" → try "Sketch001"; "Sketch12" → try "Sketch012"
+            variants.append(f"{base}{num:03d}")
+        # Also try without leading zeros: "Sketch001" when given "Sketch1"
+        if len(num_str) == 1 and num > 0:
+            variants.append(f"{base}0{num_str}")  # e.g. "Sketch01"
+        for variant in variants:
+            obj = doc.getObject(variant)
+            if obj:
+                return obj
+            for o in doc.Objects:
+                if o.Label == variant:
+                    return o
+
     return None
+
+
+def _suggest_similar(doc, name_or_label, type_filter=None):
+    """Return a hint string listing objects with similar names.
+
+    Args:
+        doc: FreeCAD document
+        name_or_label: The name that was not found
+        type_filter: Optional TypeId substring to filter (e.g. "Sketcher" or "Body")
+    """
+    import re
+    # Extract the base name (letters) for matching
+    base = re.match(r'^[A-Za-z_]+', name_or_label)
+    base_str = base.group(0).lower() if base else ""
+
+    candidates = []
+    for o in doc.Objects:
+        if type_filter and type_filter not in o.TypeId:
+            continue
+        # Match by base name similarity
+        o_base = re.match(r'^[A-Za-z_]+', o.Name)
+        o_base_str = o_base.group(0).lower() if o_base else ""
+        if base_str and o_base_str == base_str:
+            candidates.append(o.Name)
+        elif base_str and base_str in o.Label.lower():
+            candidates.append(o.Name)
+
+    if not candidates:
+        # No base-name match — list all objects of that type
+        for o in doc.Objects:
+            if type_filter and type_filter not in o.TypeId:
+                continue
+            # Skip internal objects like Origin, axes, planes
+            if o.TypeId.startswith("App::"):
+                continue
+            candidates.append(o.Name)
+
+    if candidates:
+        return f" Available: {', '.join(candidates[:8])}"
+    return ""
 
 
 def _find_body_for(doc, obj):
