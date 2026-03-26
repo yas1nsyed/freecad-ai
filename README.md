@@ -76,6 +76,21 @@ Configuration is stored at `~/.config/FreeCAD/FreeCADAI/config.json`.
 | OpenAI | Yes | GPT models |
 | Gemini | Yes | Google AI via OpenAI-compatible endpoint |
 | OpenRouter | Yes | Multi-provider gateway |
+| Moonshot | Yes | Kimi models (temperature locked) |
+| DeepSeek | Yes | DeepSeek-V3 |
+| Qwen | Yes | Alibaba DashScope (international) |
+| Groq | Yes | Ultra-fast inference |
+| Mistral | Yes | Mistral models |
+| Together | Yes | Open model hosting |
+| Fireworks | Yes | Fast inference |
+| xAI | Yes | Grok models |
+| Cohere | Yes | Command models |
+| SambaNova | Yes | Fast inference |
+| MiniMax | Yes | MiniMax models |
+| Llama | Yes | Meta's official Llama API |
+| GitHub | Yes (PAT) | GitHub Models marketplace |
+| HuggingFace | Yes (`hf_...`) | Serverless inference API |
+| Zhipu | Yes | GLM models (z.ai international) |
 | Custom | Varies | Any OpenAI-compatible endpoint |
 
 ## Usage
