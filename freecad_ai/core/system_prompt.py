@@ -429,11 +429,12 @@ def build_system_prompt(mode: str = "plan", agents_md: str = "",
         if skill_descriptions:
             sections.append("## Available Skills")
             sections.append(
-                "Skills are slash commands that the USER types in the chat. "
-                "They are NOT tools — you CANNOT call them via tool calls. "
-                "If the user's request matches a skill, tell them to type the "
-                "command (e.g., 'Try typing `/enclosure 80x160x60mm, screw lid` "
-                "for best results.'). Do NOT attempt to call a skill as a tool."
+                "Skills are slash commands the user can type in the chat "
+                "(e.g. `/enclosure 80x160x60mm, screw lid`). "
+                "They inject detailed step-by-step instructions for complex tasks. "
+                "Do NOT redirect users to skills — if the user asks you to create "
+                "something, do it directly using your tools. "
+                "Only mention skills if the user explicitly asks about them."
             )
             sections.append(skill_descriptions)
             sections.append("")
