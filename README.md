@@ -18,7 +18,7 @@ An AI-powered assistant workbench for FreeCAD that generates and executes Python
 - **Thinking mode** — enable LLM reasoning for complex multi-step tasks (Off / On / Extended)
 - **Context compacting** — automatically summarizes older messages when approaching context limits
 - **Session resume** — save and load chat sessions to continue work later
-- **Multiple LLM providers** — Anthropic, OpenAI, Ollama, Gemini, OpenRouter, or any OpenAI-compatible endpoint
+- **22 LLM providers** — Anthropic, OpenAI, Ollama, Gemini, OpenRouter, DeepSeek, Qwen, Groq, Mistral, Together, Fireworks, xAI, Cohere, SambaNova, MiniMax, Llama, GitHub Models, HuggingFace, Zhipu, Moonshot, and any OpenAI-compatible endpoint
 - **Context-aware** — automatically includes document state (objects, properties, selection) in prompts
 - **Error self-correction** — failed code is sent back to the LLM for automatic retry (up to 3 attempts)
 - **AGENTS.md support** — project-level instructions with include directives and variable substitution
@@ -26,7 +26,7 @@ An AI-powered assistant workbench for FreeCAD that generates and executes Python
 
 ## Requirements
 
-- FreeCAD 1.0+ (tested with 1.0.2)
+- FreeCAD 1.0+ (tested with 1.0.2 and 1.1.0)
 - An LLM provider (local Ollama, or an API key for a cloud provider)
 
 ## Installation
