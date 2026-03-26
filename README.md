@@ -8,8 +8,8 @@ An AI-powered assistant workbench for FreeCAD that generates and executes Python
 
 - **Chat interface** — dock widget with streaming LLM responses
 - **Plan / Act modes** — review code before execution (Plan) or auto-execute (Act)
-- **Tool calling** — 33 structured FreeCAD operations (Act mode) for safer, more reliable modeling
-- **Skills** — reusable instruction sets invoked via `/command` (enclosure, gear, fastener holes, etc.)
+- **Tool calling** — 34 structured FreeCAD operations (Act mode) for safer, more reliable modeling
+- **Skills** — reusable instruction sets the model invokes autonomously or via `/command` (enclosure, gear, fastener holes, etc.)
 - **Skill optimizer** — automatically improve skill instructions via iterative test-evaluate-modify loop (`/optimize-skill`)
 - **Hooks** — user-defined Python hooks for lifecycle events (block tools, modify input, log activity)
 - **User extension tools** — register your own Python functions as LLM-callable tools (`.py` or `.FCMacro`)

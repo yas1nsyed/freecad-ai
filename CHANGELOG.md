@@ -16,11 +16,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [0.4.0-alpha] - 2026-03-26
 
-Multi-provider support and tool calling reliability.
+Multi-provider support, tool calling reliability, and autonomous skill invocation.
 
 ### Added
 
 - **16 new LLM providers** — DeepSeek, Qwen (DashScope), Groq, Mistral, Together AI, Fireworks AI, xAI (Grok), Cohere, SambaNova, MiniMax, Llama (Meta), GitHub Models, HuggingFace, Zhipu (GLM), Moonshot (Kimi). All OpenAI-compatible with tool calling support. Total: 22 providers + custom.
+- **`use_skill` tool** — the model can now autonomously invoke skills when the user's request matches one. Instead of redirecting users to type `/enclosure`, the model calls `use_skill("enclosure", "120x80x60mm, screw lid")`, gets the step-by-step instructions, and executes them with tools. Natural language "create an enclosure" now works end-to-end.
+- **Editable system prompt** — the full system prompt is now visible and editable in Settings, with a "Reset to Default" button. Users can customize the instructions sent to the LLM.
 - **Dynamic API key resolution** — API keys support `file:/path/to/token` (re-read each call) and `cmd:command` (run command, use stdout) prefixes to avoid storing keys in plaintext.
 - **Smart object name resolution** — `_get_object()` auto-resolves common LLM naming mistakes (`Sketch0`→`Sketch`, `Sketch1`→`Sketch001`, `Body1`→`Body001`). Error messages now list available objects via `_suggest_similar()` for LLM self-correction.
 
@@ -31,11 +33,14 @@ Multi-provider support and tool calling reliability.
 - **`reasoning_content` preservation** — thinking models (e.g. Kimi-K2.5) that return `reasoning_content` in assistant messages now have it preserved across agentic loop turns. Without this, multi-turn tool chaining broke after the first turn.
 - **Moonshot parameter constraints** — temperature, top_p, and penalty values are automatically overridden to Kimi-K2.5's required fixed values. Temperature field is greyed out in Settings when Moonshot is selected.
 - **Non-streaming `stop_reason` detection** — now correctly sets `stop_reason="tool_use"` when tool calls are present regardless of the provider's `finish_reason` value.
+- **Enclosure skill screw geometry** — screw posts now start from the floor surface (offset=T) instead of z=0, and screw holes use fixed depth (H-T) instead of through_all so they don't exit through the bottom wall.
+- **PROVIDER_PRESETS consolidation** — eliminated duplicated provider config between `config.py` and `providers.py`. Adding a new provider is now a single-file change.
 
 ### Changed
 
 - **Snap tabs as PartDesign features** — `create_snap_tabs` now creates `PartDesign::AdditiveBox` features inside the lid body instead of a standalone `Part::Feature`. Tabs are individually editable and compatible with fillet, chamfer, pattern, and other PartDesign tools.
 - **Better tool success messages** — `create_sketch`, `create_body`, `pad_sketch`, and `pocket_sketch` now include explicit naming hints (e.g., "Use sketch_name='Sketch001' in pad_sketch/pocket_sketch").
+- **Skills no longer redirect** — the system prompt no longer tells the model to ask users to type slash commands. The model uses `use_skill` to load instructions and executes them directly.
 
 ## [0.3.0-alpha] - 2026-03-14
 
