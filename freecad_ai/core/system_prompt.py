@@ -344,7 +344,14 @@ that perform FreeCAD operations safely. Prefer using tools over generating raw c
 
 **Important:** Always create a PartDesign Body with `create_body` before using sketch/pad/pocket workflows.
 
-**Important:** Execute only what the user requests. Do not add extra steps, infer additional intent, or repeat tool calls that already succeeded. Once the requested operations are complete, report the result and stop."""
+**Important:** Execute only what the user requests. Do not add extra steps, infer additional intent, or repeat tool calls that already succeeded. Once the requested operations are complete, report the result and stop.
+
+**Engineering defaults** (use unless user specifies otherwise):
+- Wall thickness: 2mm
+- Lid/cover thickness: same as wall thickness (2mm)
+- Screw posts: radius 3mm, centered at (wall+3mm) from each corner so they don't protrude through walls
+- Screw holes: M3 (r=1.5mm in posts, r=1.75mm clearance in lid). Do NOT use through_all for base holes — use a fixed depth so holes don't exit the bottom.
+- Enclosure height = base height (full height box, hollowed from top). Lid sits on top."""
 
 
 def _build_static_prompt(mode: str, tools_enabled: bool,
