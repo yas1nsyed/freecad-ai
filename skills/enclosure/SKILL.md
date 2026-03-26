@@ -30,14 +30,14 @@ Post centers must be far enough from walls so they don't protrude:
 - Center X positions: T+PR (left), L-T-PR (right)
 - Center Y positions: T+PR (front), W-T-PR (back)
 
-**Step 4: Screw posts**
-- `create_sketch` on XY, body_name="EnclosureBase": 4 circles at those positions, radius=PR
+**Step 4: Screw posts** (start from top of floor, not bottom)
+- `create_sketch` on XY, **offset=T**, body_name="EnclosureBase": 4 circles at those positions, radius=PR
 - `pad_sketch` length=**H-T**, body_name="EnclosureBase"
 
 **Step 5: Screw holes in posts** — MUST complete BEFORE moving to step 6!
-- `create_sketch` on XY, body_name="EnclosureBase": 4 circles at same centers, radius=1.5 (M3)
-- `pocket_sketch` through_all=true, body_name="EnclosureBase"
-- **IMPORTANT**: This pocket goes into EnclosureBase (the base), NOT the lid. Do NOT proceed to step 6 until this pocket is done.
+- `create_sketch` on XY, **offset=H**, body_name="EnclosureBase": 4 circles at same centers, radius=1.5 (M3)
+- `pocket_sketch` length=**H-T**, body_name="EnclosureBase"
+- The holes go H-T deep (through the posts only, NOT through the floor)
 
 ### 6. Lid body
 
