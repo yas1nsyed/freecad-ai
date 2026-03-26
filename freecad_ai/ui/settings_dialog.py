@@ -379,7 +379,16 @@ class SettingsDialog(QDialog):
         self.model_edit.setText(cfg.provider.model)
         self.max_tokens_spin.setValue(cfg.max_tokens)
         self.context_window_spin.setValue(cfg.context_window)
-        self.temperature_edit.setText(str(cfg.temperature))
+        # Disable temperature for providers with fixed values
+        fixed = self._FIXED_TEMPERATURE_PROVIDERS.get(cfg.provider.name)
+        if fixed:
+            self.temperature_edit.setEnabled(False)
+            self.temperature_edit.setText("fixed")
+            self.temperature_edit.setToolTip(fixed)
+        else:
+            self.temperature_edit.setEnabled(True)
+            self.temperature_edit.setText(str(cfg.temperature))
+            self.temperature_edit.setToolTip("")
         self.auto_execute_check.setChecked(cfg.auto_execute)
 
         thinking_map = {"off": 0, "on": 1, "extended": 2}
@@ -410,6 +419,12 @@ class SettingsDialog(QDialog):
         # Hooks
         self._refresh_hooks_list()
 
+    # Providers that require fixed temperature values.
+    # Maps provider name → tooltip explaining the constraint.
+    _FIXED_TEMPERATURE_PROVIDERS = {
+        "moonshot": "Kimi-K2.5 requires fixed temperature (1.0 thinking / 0.6 non-thinking)",
+    }
+
     def _on_provider_changed(self, index):
         """Update base URL and model when provider selection changes."""
         names = get_provider_names()
@@ -418,6 +433,18 @@ class SettingsDialog(QDialog):
             preset = PROVIDER_PRESETS.get(name, {})
             self.base_url_edit.setText(preset.get("base_url", ""))
             self.model_edit.setText(preset.get("default_model", ""))
+
+            # Disable temperature for providers with fixed values
+            fixed = self._FIXED_TEMPERATURE_PROVIDERS.get(name)
+            if fixed:
+                self.temperature_edit.setEnabled(False)
+                self.temperature_edit.setText("fixed")
+                self.temperature_edit.setToolTip(fixed)
+            else:
+                self.temperature_edit.setEnabled(True)
+                self.temperature_edit.setToolTip("")
+                if self.temperature_edit.text() == "fixed":
+                    self.temperature_edit.setText("0.3")
 
     def _save(self):
         """Save settings to config and close."""
