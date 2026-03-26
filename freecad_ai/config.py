@@ -60,6 +60,7 @@ class AppConfig:
     scan_freecad_macros: bool = False
     hooks_disabled: list = field(default_factory=list)
     prompt_style: str = "auto"  # "auto", "standard", "minimal"
+    system_prompt_override: str = ""  # empty = use default; non-empty = use as-is
     vision_detected: bool | None = None   # None=not tested, True/False=probe result
     vision_override: bool | None = None   # user manual override, takes precedence
 

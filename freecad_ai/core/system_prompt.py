@@ -347,19 +347,11 @@ that perform FreeCAD operations safely. Prefer using tools over generating raw c
 **Important:** Execute only what the user requests. Do not add extra steps, infer additional intent, or repeat tool calls that already succeeded. Once the requested operations are complete, report the result and stop."""
 
 
-def build_system_prompt(mode: str = "plan", agents_md: str = "",
-                        tools_enabled: bool = False,
-                        prompt_style: str = "standard") -> str:
-    """Build the full system prompt.
+def _build_static_prompt(mode: str, tools_enabled: bool,
+                         prompt_style: str) -> str:
+    """Build the static (instruction) part of the system prompt.
 
-    Args:
-        mode: "plan" or "act"
-        agents_md: Contents of AGENTS.md / FREECAD_AI.md file, if any
-        tools_enabled: Whether tool calling is active (shorter prompt, no API ref)
-        prompt_style: "standard" (full tool descriptions) or "minimal"
-                      (no tool descriptions — the model uses tools schema directly).
-                      Moonshot/Kimi docs recommend "minimal" to avoid interfering
-                      with autonomous tool selection.
+    This is the part the user can customize in Settings.
     """
     sections = [IDENTITY, ""]
 
@@ -376,19 +368,52 @@ def build_system_prompt(mode: str = "plan", agents_md: str = "",
     sections.append("")
 
     if tools_enabled:
-        # With tools, use abbreviated conventions (tools handle the API)
         sections.append(CODE_CONVENTIONS_TOOLS)
     else:
-        # Without tools, include full API reference
         sections.append(FREECAD_API_REFERENCE)
         sections.append("")
         sections.append(CODE_CONVENTIONS)
     sections.append("")
 
-    # Response format (only without tools)
     if not tools_enabled:
         sections.append(RESPONSE_FORMAT)
         sections.append("")
+
+    return "\n".join(sections)
+
+
+def get_default_system_prompt(mode: str = "act", tools_enabled: bool = True,
+                              prompt_style: str = "standard") -> str:
+    """Return the default static system prompt for the given settings.
+
+    Useful for populating the Settings text field with a reset-able default.
+    """
+    return _build_static_prompt(mode, tools_enabled, prompt_style)
+
+
+def build_system_prompt(mode: str = "plan", agents_md: str = "",
+                        tools_enabled: bool = False,
+                        prompt_style: str = "standard",
+                        override: str = "") -> str:
+    """Build the full system prompt.
+
+    Args:
+        mode: "plan" or "act"
+        agents_md: Contents of AGENTS.md / FREECAD_AI.md file, if any
+        tools_enabled: Whether tool calling is active (shorter prompt, no API ref)
+        prompt_style: "standard" (full tool descriptions) or "minimal"
+                      (no tool descriptions — the model uses tools schema directly).
+        override: If non-empty, replaces the static instruction portion of the
+                  prompt. Dynamic sections (document context, skills, AGENTS.md)
+                  are still appended.
+    """
+    # Static instructions — either user override or generated default
+    if override:
+        static = override
+    else:
+        static = _build_static_prompt(mode, tools_enabled, prompt_style)
+
+    sections = [static]
 
     # Document context
     doc_ctx = get_document_context()

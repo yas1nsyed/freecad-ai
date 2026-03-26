@@ -1106,10 +1106,12 @@ class ChatDockWidget(QDockWidget):
             if ps == "auto":
                 ps = get_default_prompt_style(cfg.provider.name)
             system_prompt = build_system_prompt(
-                mode=mode, tools_enabled=True, prompt_style=ps)
+                mode=mode, tools_enabled=True, prompt_style=ps,
+                override=cfg.system_prompt_override)
         else:
             self._tool_registry = None
-            system_prompt = build_system_prompt(mode=mode)
+            system_prompt = build_system_prompt(
+                mode=mode, override=cfg.system_prompt_override)
 
         # Build describe_fn for non-vision LLMs
         describe_fn = None
