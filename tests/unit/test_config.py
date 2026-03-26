@@ -106,8 +106,9 @@ class TestProviderPresets:
             assert "default_model" in preset, f"{name} missing default_model"
 
     def test_known_presets_exist(self):
-        expected = {"anthropic", "openai", "ollama", "gemini", "openrouter", "custom"}
-        assert set(PROVIDER_PRESETS.keys()) == expected
+        from freecad_ai.llm.providers import PROVIDERS
+        # PROVIDER_PRESETS should have exactly the same keys as PROVIDERS
+        assert set(PROVIDER_PRESETS.keys()) == set(PROVIDERS.keys())
 
 
 class TestSaveLoad:

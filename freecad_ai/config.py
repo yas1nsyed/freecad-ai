@@ -15,32 +15,14 @@ SKILLS_DIR = os.path.join(CONFIG_DIR, "skills")
 USER_TOOLS_DIR = os.path.join(CONFIG_DIR, "tools")
 HOOKS_DIR = os.path.join(CONFIG_DIR, "hooks")
 
-# Provider presets
+# Provider presets — derived from the canonical PROVIDERS dict in llm/providers.py.
+# Each preset contains only base_url and default_model (the fields the Settings
+# dialog needs for auto-filling when the user switches providers).
+from .llm.providers import PROVIDERS as _PROVIDERS
+
 PROVIDER_PRESETS = {
-    "anthropic": {
-        "base_url": "https://api.anthropic.com",
-        "default_model": "claude-sonnet-4-20250514",
-    },
-    "openai": {
-        "base_url": "https://api.openai.com/v1",
-        "default_model": "gpt-4o",
-    },
-    "ollama": {
-        "base_url": "http://localhost:11434/v1",
-        "default_model": "llama3",
-    },
-    "gemini": {
-        "base_url": "https://generativelanguage.googleapis.com/v1beta/openai",
-        "default_model": "gemini-2.0-flash",
-    },
-    "openrouter": {
-        "base_url": "https://openrouter.ai/api/v1",
-        "default_model": "anthropic/claude-sonnet-4-20250514",
-    },
-    "custom": {
-        "base_url": "",
-        "default_model": "",
-    },
+    name: {"base_url": p["base_url"], "default_model": p["default_model"]}
+    for name, p in _PROVIDERS.items()
 }
 
 
@@ -77,6 +59,7 @@ class AppConfig:
     user_tools_disabled: list = field(default_factory=list)
     scan_freecad_macros: bool = False
     hooks_disabled: list = field(default_factory=list)
+    prompt_style: str = "auto"  # "auto", "standard", "minimal"
     vision_detected: bool | None = None   # None=not tested, True/False=probe result
     vision_override: bool | None = None   # user manual override, takes precedence
 
