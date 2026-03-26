@@ -312,7 +312,31 @@ class LLMClient:
         elif self.thinking != "off":
             effort_map = {"on": "medium", "extended": "high"}
             body["reasoning_effort"] = effort_map.get(self.thinking, "medium")
+
+        # Provider-specific parameter overrides
+        self._apply_provider_overrides(body)
+
         return body
+
+    def _apply_provider_overrides(self, body: dict) -> None:
+        """Apply provider-specific parameter constraints.
+
+        Some providers require fixed parameter values and will reject
+        requests with non-standard values.  This method overrides the
+        user-configured values to match provider requirements.
+        """
+        if self.provider_name == "moonshot":
+            # Kimi-K2.5 requires fixed sampling parameters.
+            # Thinking mode: temperature=1.0, top_p=0.95
+            # Non-thinking:  temperature=0.6, top_p=0.95
+            if self.thinking != "off":
+                body["temperature"] = 1.0
+            else:
+                body["temperature"] = 0.6
+            body["top_p"] = 0.95
+            body["n"] = 1
+            body["presence_penalty"] = 0.0
+            body["frequency_penalty"] = 0.0
 
     def _send_openai(self, messages: list[dict], system: str, stream: bool = False) -> str:
         body = self._openai_body(messages, system, stream=False)
