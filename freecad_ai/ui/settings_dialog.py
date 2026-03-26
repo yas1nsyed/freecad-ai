@@ -178,6 +178,26 @@ class SettingsDialog(QDialog):
         thinking_layout.addStretch()
         behavior_layout.addLayout(thinking_layout)
 
+        # Prompt style
+        prompt_style_layout = QHBoxLayout()
+        prompt_style_layout.addWidget(QLabel(translate("SettingsDialog", "Prompt style:")))
+        self.prompt_style_combo = QComboBox()
+        self.prompt_style_combo.addItems([
+            translate("SettingsDialog", "Auto"),
+            translate("SettingsDialog", "Standard"),
+            translate("SettingsDialog", "Minimal"),
+        ])
+        self.prompt_style_combo.setToolTip(
+            translate("SettingsDialog",
+                      "Auto: use provider's recommended style\n"
+                      "Standard: full system prompt with tool descriptions\n"
+                      "Minimal: short prompt, model uses tool schemas directly\n"
+                      "  (recommended for Moonshot/Kimi)")
+        )
+        prompt_style_layout.addWidget(self.prompt_style_combo)
+        prompt_style_layout.addStretch()
+        behavior_layout.addLayout(prompt_style_layout)
+
         # Viewport capture settings
         viewport_layout = QHBoxLayout()
         viewport_layout.addWidget(QLabel(translate("SettingsDialog", "Viewport capture:")))
@@ -394,6 +414,9 @@ class SettingsDialog(QDialog):
         thinking_map = {"off": 0, "on": 1, "extended": 2}
         self.thinking_combo.setCurrentIndex(thinking_map.get(cfg.thinking, 0))
 
+        prompt_style_map = {"auto": 0, "standard": 1, "minimal": 2}
+        self.prompt_style_combo.setCurrentIndex(prompt_style_map.get(cfg.prompt_style, 0))
+
         capture_map = {"off": 0, "every_message": 1, "after_changes": 2}
         self.viewport_capture_combo.setCurrentIndex(capture_map.get(cfg.viewport_capture, 0))
 
@@ -467,6 +490,9 @@ class SettingsDialog(QDialog):
 
         thinking_values = ["off", "on", "extended"]
         cfg.thinking = thinking_values[self.thinking_combo.currentIndex()]
+
+        prompt_style_values = ["auto", "standard", "minimal"]
+        cfg.prompt_style = prompt_style_values[self.prompt_style_combo.currentIndex()]
 
         capture_values = ["off", "every_message", "after_changes"]
         cfg.viewport_capture = capture_values[self.viewport_capture_combo.currentIndex()]
@@ -565,6 +591,9 @@ class SettingsDialog(QDialog):
 
         thinking_values = ["off", "on", "extended"]
         cfg.thinking = thinking_values[self.thinking_combo.currentIndex()]
+
+        prompt_style_values = ["auto", "standard", "minimal"]
+        cfg.prompt_style = prompt_style_values[self.prompt_style_combo.currentIndex()]
 
     @staticmethod
     def _mcp_list_label(entry: dict) -> str:

@@ -331,20 +331,44 @@ RESPONSE_FORMAT = """\
 - If you need more information to proceed, ask the user"""
 
 
+ACT_MODE_TOOLS_MINIMAL = """\
+## Mode: Act (with Tools)
+You are in **Act** mode with tool calling enabled. You have access to structured tools \
+that perform FreeCAD operations safely. Prefer using tools over generating raw code.
+
+**How to use tools:**
+- Use the available tools to create, modify, and query 3D geometry
+- You can call multiple tools in sequence to build complex models
+- Use `execute_code` as a fallback when no structured tool covers the operation
+- After tool calls, explain what was done in natural language
+
+**Important:** Always create a PartDesign Body with `create_body` before using sketch/pad/pocket workflows.
+
+**Important:** Execute only what the user requests. Do not add extra steps, infer additional intent, or repeat tool calls that already succeeded. Once the requested operations are complete, report the result and stop."""
+
+
 def build_system_prompt(mode: str = "plan", agents_md: str = "",
-                        tools_enabled: bool = False) -> str:
+                        tools_enabled: bool = False,
+                        prompt_style: str = "standard") -> str:
     """Build the full system prompt.
 
     Args:
         mode: "plan" or "act"
         agents_md: Contents of AGENTS.md / FREECAD_AI.md file, if any
         tools_enabled: Whether tool calling is active (shorter prompt, no API ref)
+        prompt_style: "standard" (full tool descriptions) or "minimal"
+                      (no tool descriptions — the model uses tools schema directly).
+                      Moonshot/Kimi docs recommend "minimal" to avoid interfering
+                      with autonomous tool selection.
     """
     sections = [IDENTITY, ""]
 
     # Mode instructions
     if tools_enabled and mode == "act":
-        sections.append(ACT_MODE_TOOLS)
+        if prompt_style == "minimal":
+            sections.append(ACT_MODE_TOOLS_MINIMAL)
+        else:
+            sections.append(ACT_MODE_TOOLS)
     elif mode == "plan":
         sections.append(PLAN_MODE)
     else:
