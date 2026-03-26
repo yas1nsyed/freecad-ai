@@ -2844,6 +2844,57 @@ REPORT_SKILL_PARAMS = ToolDefinition(
 )
 
 
+# ── use_skill ──────────────────────────────────────────────
+
+def _handle_use_skill(name: str, args: str = "") -> ToolResult:
+    """Load a skill's instructions and return them for the model to follow.
+
+    The skill content (SKILL.md) is returned as the tool result. The model
+    should read these instructions and follow them step by step using its
+    available tools.
+    """
+    from ..extensions.skills import SkillsRegistry
+    registry = SkillsRegistry()
+    result = registry.execute_skill(name, args)
+
+    if "error" in result:
+        available = [s.name for s in registry.get_available()]
+        return ToolResult(
+            success=False, output="",
+            error=f"{result['error']}. Available skills: {', '.join(available)}")
+
+    if "inject_prompt" in result:
+        content = result["inject_prompt"]
+        if args:
+            content += f"\n\nUser request: {args}"
+        return ToolResult(success=True, output=content)
+
+    if "output" in result:
+        return ToolResult(success=True, output=result["output"])
+
+    return ToolResult(success=False, output="", error="Skill returned no content")
+
+
+USE_SKILL = ToolDefinition(
+    name="use_skill",
+    description=(
+        "Load a skill's detailed instructions for a complex task. "
+        "Skills provide step-by-step construction guides (e.g. enclosure, gear). "
+        "Call this when the user's request matches a skill, then follow the "
+        "returned instructions using your tools."
+    ),
+    parameters=[
+        ToolParam("name", "string",
+                  "Skill name (e.g. 'enclosure', 'gear', 'fastener-hole')"),
+        ToolParam("args", "string",
+                  "User's parameters for the skill (e.g. '120x80x60mm, screw lid')",
+                  required=False, default=""),
+    ],
+    handler=_handle_use_skill,
+    category="query",
+)
+
+
 # ── All tools ───────────────────────────────────────────────
 
 ALL_TOOLS = [
@@ -2880,5 +2931,6 @@ ALL_TOOLS = [
     SET_VIEW,
     ZOOM_OBJECT,
     REPORT_SKILL_PARAMS,
+    USE_SKILL,
     SELECT_GEOMETRY,
 ]
