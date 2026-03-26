@@ -183,21 +183,12 @@ class SettingsDialog(QDialog):
         prompt_group = QGroupBox(translate("SettingsDialog", "System Prompt"))
         prompt_layout = QVBoxLayout()
 
-        prompt_style_layout = QHBoxLayout()
-        prompt_style_layout.addWidget(QLabel(translate("SettingsDialog", "Preset:")))
-        self.prompt_style_combo = QComboBox()
-        self.prompt_style_combo.addItems([
-            translate("SettingsDialog", "Auto (recommended for provider)"),
-            translate("SettingsDialog", "Standard (full tool descriptions)"),
-            translate("SettingsDialog", "Minimal (model reads tool schemas)"),
-        ])
-        self.prompt_style_combo.currentIndexChanged.connect(self._on_prompt_preset_changed)
-        prompt_style_layout.addWidget(self.prompt_style_combo)
+        prompt_btn_layout = QHBoxLayout()
         self.prompt_reset_btn = QPushButton(translate("SettingsDialog", "Reset to Default"))
         self.prompt_reset_btn.clicked.connect(self._reset_system_prompt)
-        prompt_style_layout.addWidget(self.prompt_reset_btn)
-        prompt_style_layout.addStretch()
-        prompt_layout.addLayout(prompt_style_layout)
+        prompt_btn_layout.addWidget(self.prompt_reset_btn)
+        prompt_btn_layout.addStretch()
+        prompt_layout.addLayout(prompt_btn_layout)
 
         QPlainTextEdit = QtWidgets.QPlainTextEdit
         self.system_prompt_edit = QPlainTextEdit()
@@ -429,9 +420,6 @@ class SettingsDialog(QDialog):
         thinking_map = {"off": 0, "on": 1, "extended": 2}
         self.thinking_combo.setCurrentIndex(thinking_map.get(cfg.thinking, 0))
 
-        prompt_style_map = {"auto": 0, "standard": 1, "minimal": 2}
-        self.prompt_style_combo.setCurrentIndex(prompt_style_map.get(cfg.prompt_style, 0))
-
         # System prompt text: show override if set, otherwise generate default
         default_prompt = self._get_default_prompt_text()
         self._last_default_prompt = default_prompt
@@ -492,33 +480,10 @@ class SettingsDialog(QDialog):
                 if self.temperature_edit.text() == "fixed":
                     self.temperature_edit.setText("0.3")
 
-    def _get_current_prompt_style(self) -> str:
-        """Return the resolved prompt style based on combo selection."""
-        values = ["auto", "standard", "minimal"]
-        ps = values[self.prompt_style_combo.currentIndex()]
-        if ps == "auto":
-            from ..llm.providers import get_default_prompt_style
-            names = get_provider_names()
-            idx = self.provider_combo.currentIndex()
-            name = names[idx] if 0 <= idx < len(names) else "anthropic"
-            ps = get_default_prompt_style(name)
-        return ps
-
     def _get_default_prompt_text(self) -> str:
         """Generate the default system prompt for the current settings."""
         from ..core.system_prompt import get_default_system_prompt
-        return get_default_system_prompt(
-            mode="act", tools_enabled=True,
-            prompt_style=self._get_current_prompt_style())
-
-    def _on_prompt_preset_changed(self, _index):
-        """Update the text field when the preset combo changes."""
-        current_text = self.system_prompt_edit.toPlainText().strip()
-        # Only auto-fill if the text is empty or matches a known default
-        if not current_text or current_text == self._last_default_prompt:
-            default = self._get_default_prompt_text()
-            self.system_prompt_edit.setPlainText(default)
-            self._last_default_prompt = default
+        return get_default_system_prompt(mode="act", tools_enabled=True)
 
     def _reset_system_prompt(self):
         """Reset the system prompt text to the default for current settings."""
@@ -547,9 +512,6 @@ class SettingsDialog(QDialog):
 
         thinking_values = ["off", "on", "extended"]
         cfg.thinking = thinking_values[self.thinking_combo.currentIndex()]
-
-        prompt_style_values = ["auto", "standard", "minimal"]
-        cfg.prompt_style = prompt_style_values[self.prompt_style_combo.currentIndex()]
 
         # Save system prompt override (empty if user hasn't changed from default)
         custom_text = self.system_prompt_edit.toPlainText().strip()

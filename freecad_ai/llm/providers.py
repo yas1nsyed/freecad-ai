@@ -42,7 +42,6 @@ PROVIDERS = {
         "default_model": "kimi-k2.5",
         "api_style": "openai",
         "supports_tools": True,
-        "prompt_style": "minimal",
     },
     "deepseek": {
         "base_url": "https://api.deepseek.com/v1",
@@ -145,16 +144,6 @@ def get_api_style(provider_name: str) -> str:
 def supports_tools(provider_name: str) -> bool:
     """Return whether a provider supports native tool calling."""
     return PROVIDERS.get(provider_name, {}).get("supports_tools", False)
-
-
-def get_default_prompt_style(provider_name: str) -> str:
-    """Return the recommended prompt style for a provider.
-
-    "standard" — full system prompt with tool descriptions (most providers).
-    "minimal"  — no tool descriptions in system prompt; the model uses
-                 the tools schema directly (recommended by Moonshot for Kimi).
-    """
-    return PROVIDERS.get(provider_name, {}).get("prompt_style", "standard")
 
 
 def get_provider_names() -> list[str]:

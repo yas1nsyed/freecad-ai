@@ -331,31 +331,7 @@ RESPONSE_FORMAT = """\
 - If you need more information to proceed, ask the user"""
 
 
-ACT_MODE_TOOLS_MINIMAL = """\
-## Mode: Act (with Tools)
-You are in **Act** mode with tool calling enabled. You have access to structured tools \
-that perform FreeCAD operations safely. Prefer using tools over generating raw code.
-
-**How to use tools:**
-- Use the available tools to create, modify, and query 3D geometry
-- You can call multiple tools in sequence to build complex models
-- Use `execute_code` as a fallback when no structured tool covers the operation
-- After tool calls, explain what was done in natural language
-
-**Important:** Always create a PartDesign Body with `create_body` before using sketch/pad/pocket workflows.
-
-**Important:** Execute only what the user requests. Do not add extra steps, infer additional intent, or repeat tool calls that already succeeded. Once the requested operations are complete, report the result and stop.
-
-**Engineering defaults** (use unless user specifies otherwise):
-- Wall thickness: 2mm
-- Lid/cover thickness: same as wall thickness (2mm)
-- Screw posts: radius 3mm, centered at (wall+3mm) from each corner so they don't protrude through walls
-- Screw holes: M3 (r=1.5mm in posts, r=1.75mm clearance in lid). Do NOT use through_all for base holes — use a fixed depth so holes don't exit the bottom.
-- Enclosure height = base height (full height box, hollowed from top). Lid sits on top."""
-
-
-def _build_static_prompt(mode: str, tools_enabled: bool,
-                         prompt_style: str) -> str:
+def _build_static_prompt(mode: str, tools_enabled: bool) -> str:
     """Build the static (instruction) part of the system prompt.
 
     This is the part the user can customize in Settings.
@@ -364,10 +340,7 @@ def _build_static_prompt(mode: str, tools_enabled: bool,
 
     # Mode instructions
     if tools_enabled and mode == "act":
-        if prompt_style == "minimal":
-            sections.append(ACT_MODE_TOOLS_MINIMAL)
-        else:
-            sections.append(ACT_MODE_TOOLS)
+        sections.append(ACT_MODE_TOOLS)
     elif mode == "plan":
         sections.append(PLAN_MODE)
     else:
@@ -389,18 +362,17 @@ def _build_static_prompt(mode: str, tools_enabled: bool,
     return "\n".join(sections)
 
 
-def get_default_system_prompt(mode: str = "act", tools_enabled: bool = True,
-                              prompt_style: str = "standard") -> str:
+def get_default_system_prompt(mode: str = "act",
+                              tools_enabled: bool = True) -> str:
     """Return the default static system prompt for the given settings.
 
     Useful for populating the Settings text field with a reset-able default.
     """
-    return _build_static_prompt(mode, tools_enabled, prompt_style)
+    return _build_static_prompt(mode, tools_enabled)
 
 
 def build_system_prompt(mode: str = "plan", agents_md: str = "",
                         tools_enabled: bool = False,
-                        prompt_style: str = "standard",
                         override: str = "") -> str:
     """Build the full system prompt.
 
@@ -408,8 +380,6 @@ def build_system_prompt(mode: str = "plan", agents_md: str = "",
         mode: "plan" or "act"
         agents_md: Contents of AGENTS.md / FREECAD_AI.md file, if any
         tools_enabled: Whether tool calling is active (shorter prompt, no API ref)
-        prompt_style: "standard" (full tool descriptions) or "minimal"
-                      (no tool descriptions — the model uses tools schema directly).
         override: If non-empty, replaces the static instruction portion of the
                   prompt. Dynamic sections (document context, skills, AGENTS.md)
                   are still appended.
@@ -418,7 +388,7 @@ def build_system_prompt(mode: str = "plan", agents_md: str = "",
     if override:
         static = override
     else:
-        static = _build_static_prompt(mode, tools_enabled, prompt_style)
+        static = _build_static_prompt(mode, tools_enabled)
 
     sections = [static]
 

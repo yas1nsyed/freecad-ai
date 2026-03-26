@@ -1100,13 +1100,8 @@ class ChatDockWidget(QDockWidget):
                 tools_schema = self._tool_registry.to_anthropic_schema()
             else:
                 tools_schema = self._tool_registry.to_openai_schema()
-            # Resolve prompt style: "auto" uses provider default
-            from ..llm.providers import get_default_prompt_style
-            ps = cfg.prompt_style
-            if ps == "auto":
-                ps = get_default_prompt_style(cfg.provider.name)
             system_prompt = build_system_prompt(
-                mode=mode, tools_enabled=True, prompt_style=ps,
+                mode=mode, tools_enabled=True,
                 override=cfg.system_prompt_override)
         else:
             self._tool_registry = None
