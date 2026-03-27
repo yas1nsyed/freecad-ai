@@ -2851,17 +2851,33 @@ def _handle_use_skill(name: str, args: str = "") -> ToolResult:
 
     The skill content (SKILL.md) is returned as the tool result. The model
     should read these instructions and follow them step by step using its
-    available tools.
+    available tools.  If the exact name isn't found, a fuzzy search on skill
+    names and descriptions is attempted.
     """
     from ..extensions.skills import SkillsRegistry
     registry = SkillsRegistry()
     result = registry.execute_skill(name, args)
 
     if "error" in result:
-        available = [s.name for s in registry.get_available()]
-        return ToolResult(
-            success=False, output="",
-            error=f"{result['error']}. Available skills: {', '.join(available)}")
+        # Fuzzy match: search skill names and descriptions
+        query = name.lower()
+        matches = []
+        for skill in registry.get_available():
+            if query in skill.name.lower() or query in skill.description.lower():
+                matches.append(skill)
+        if len(matches) == 1:
+            # Exactly one match — use it
+            result = registry.execute_skill(matches[0].name, args)
+        elif matches:
+            names = [s.name for s in matches]
+            return ToolResult(
+                success=False, output="",
+                error=f"Skill '{name}' not found. Did you mean: {', '.join(names)}?")
+        else:
+            available = [s.name for s in registry.get_available()]
+            return ToolResult(
+                success=False, output="",
+                error=f"Skill '{name}' not found. Available: {', '.join(available)}")
 
     if "inject_prompt" in result:
         content = result["inject_prompt"]
