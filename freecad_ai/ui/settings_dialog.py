@@ -155,6 +155,11 @@ class SettingsDialog(QDialog):
         behavior_group = QGroupBox(translate("SettingsDialog", "Behavior"))
         behavior_layout = QVBoxLayout()
 
+        self.enable_tools_check = QCheckBox(
+            translate("SettingsDialog", "Model supports tool calling (uncheck to fall back to code generation)")
+        )
+        behavior_layout.addWidget(self.enable_tools_check)
+
         self.auto_execute_check = QCheckBox(
             translate("SettingsDialog", "Auto-execute code in Act mode (skip confirmation dialog)")
         )
@@ -415,6 +420,7 @@ class SettingsDialog(QDialog):
             self.temperature_edit.setEnabled(True)
             self.temperature_edit.setText(str(cfg.temperature))
             self.temperature_edit.setToolTip("")
+        self.enable_tools_check.setChecked(cfg.enable_tools)
         self.auto_execute_check.setChecked(cfg.auto_execute)
 
         thinking_map = {"off": 0, "on": 1, "extended": 2}
@@ -508,6 +514,7 @@ class SettingsDialog(QDialog):
         except ValueError:
             cfg.temperature = 0.3
 
+        cfg.enable_tools = self.enable_tools_check.isChecked()
         cfg.auto_execute = self.auto_execute_check.isChecked()
 
         thinking_values = ["off", "on", "extended"]
