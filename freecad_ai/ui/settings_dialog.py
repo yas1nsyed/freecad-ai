@@ -626,9 +626,6 @@ class SettingsDialog(QDialog):
         thinking_values = ["off", "on", "extended"]
         cfg.thinking = thinking_values[self.thinking_combo.currentIndex()]
 
-        prompt_style_values = ["auto", "standard", "minimal"]
-        cfg.prompt_style = prompt_style_values[self.prompt_style_combo.currentIndex()]
-
         custom_text = self.system_prompt_edit.toPlainText().strip()
         default_text = self._get_default_prompt_text().strip()
         if custom_text != default_text:
