@@ -14,6 +14,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - **Hooks system** — user-defined Python hooks that fire on lifecycle events (`pre_tool_use`, `post_tool_use`, `user_prompt_submit`, `post_response`). Hooks can block actions, modify input, or log activity. Directory-based discovery at `~/.config/FreeCAD/FreeCADAI/hooks/`. Includes built-in `log-tool-calls` hook and Settings UI for managing hooks.
 - **Configurable context window** — new "Context Window" setting controls when automatic conversation compaction triggers. Set to your model's context limit or lower to control API costs.
 
+## [0.6.0-alpha] - 2026-03-28
+
+New tools, Skills management, and snap packaging fix.
+
+### Added
+
+- **`describe_model` tool** — comprehensive geometry summary of an object in one call: bounding box, volume, face/edge counts, hollow/solid detection, estimated wall thickness, and PartDesign feature list.
+- **`redo` tool** — redo previously undone operations.
+- **`undo_history` tool** — show the undo/redo stack with named transactions, so the model can see what's available before deciding what to undo.
+- **`undo` enhanced** — new `until` parameter to undo back to a named transaction (e.g., `until="Pocket"`). Returns what was undone and remaining undo/redo counts.
+- **Fuzzy skill matching** — `use_skill` now does substring search on skill names and descriptions when the exact name isn't found.
+- **Skills management in Settings** — new "Skills" section showing all installed skills with status indicators (built-in, modified, user). "Reset to Built-in" button reverts stale user copies to the repo version.
+- **"Model supports tool calling" checkbox** — `enable_tools` config exposed in Settings UI. Uncheck for models that don't support tool calling.
+- **CONTRIBUTING.md** — contributor guide with fork/clone setup, commit conventions, and how to add skills/providers/tools.
+
+### Fixed
+
+- **Snap-packaged FreeCAD SSL** — handle missing `_ssl` module gracefully. HTTP connections (Ollama) work without SSL; HTTPS gives a clear error suggesting Ollama.
+- **Snap tabs default clearance** — changed from 0.2mm to 1.0mm so tabs have proper protrusion even when the model omits the parameter.
+- **`describe_model` FreeCAD Quantity** — cast `Base.Quantity` to `float` before formatting.
+- **Settings Test Connection crash** — removed leftover `prompt_style_combo` reference.
+
+### Changed
+
+- **`create_inner_ridge` simplified** — extracted `_add_rect` helper, 28 lines → 18 lines.
+- **37 tools total** (was 34).
+
 ## [0.5.0-alpha] - 2026-03-27
 
 Autonomous skill invocation and editable system prompt.
