@@ -1431,8 +1431,8 @@ EXECUTE_CODE = ToolDefinition(
 
 # ── undo ────────────────────────────────────────────────────
 
-def _handle_undo(steps: int = 1) -> ToolResult:
-    """Undo the last N operations."""
+def _handle_undo(steps: int = 1, until: str = "") -> ToolResult:
+    """Undo operations. Either N steps or until a named transaction is reached."""
     import FreeCAD as App
 
     doc = App.ActiveDocument
@@ -1446,26 +1446,145 @@ def _handle_undo(steps: int = 1) -> ToolResult:
             error="Nothing to undo (undo stack is empty)"
         )
 
+    # Get undo stack names for context
+    undo_names = doc.UndoNames if hasattr(doc, "UndoNames") else []
+
+    if until:
+        # Undo until we find the named transaction
+        query = until.lower()
+        found = False
+        for i, name in enumerate(undo_names):
+            if query in name.lower():
+                steps = i + 1
+                found = True
+                break
+        if not found:
+            stack_str = ", ".join(undo_names[:10])
+            return ToolResult(
+                success=False, output="",
+                error=f"Transaction '{until}' not found in undo stack. "
+                      f"Recent: {stack_str}")
+
     actual = min(steps, available)
+    undone_names = list(undo_names[:actual])
     for i in range(actual):
         doc.undo()
     doc.recompute()
 
+    # Show what was undone and what's left
+    remaining = doc.UndoCount
+    redo_count = doc.RedoCount if hasattr(doc, "RedoCount") else 0
+    output = f"Undid {actual} operation(s): {', '.join(undone_names)}"
+    if remaining > 0:
+        output += f"\n{remaining} more undo(s) available"
+    if redo_count > 0:
+        output += f" | {redo_count} redo(s) available"
+
     return ToolResult(
         success=True,
-        output=f"Undid {actual} operation(s)",
-        data={"steps": actual},
+        output=output,
+        data={"steps": actual, "undone": undone_names},
     )
 
 
 UNDO = ToolDefinition(
     name="undo",
-    description="Undo the last N operations in the active document.",
+    description=(
+        "Undo operations. Use steps=N to undo N operations, or "
+        "until='name' to undo back to a named transaction (e.g. 'Pad Sketch'). "
+        "Returns what was undone and how many undo/redo steps remain."
+    ),
     category="general",
     parameters=[
         ToolParam("steps", "integer", "Number of operations to undo", required=False, default=1),
+        ToolParam("until", "string",
+                  "Undo until this transaction name is reached (substring match). "
+                  "Overrides steps.", required=False, default=""),
     ],
     handler=_handle_undo,
+)
+
+
+def _handle_redo(steps: int = 1) -> ToolResult:
+    """Redo previously undone operations."""
+    import FreeCAD as App
+
+    doc = App.ActiveDocument
+    if not doc:
+        return ToolResult(success=False, output="", error="No active document")
+
+    available = doc.RedoCount if hasattr(doc, "RedoCount") else 0
+    if available == 0:
+        return ToolResult(
+            success=False, output="",
+            error="Nothing to redo (redo stack is empty)"
+        )
+
+    redo_names = doc.RedoNames if hasattr(doc, "RedoNames") else []
+    actual = min(steps, available)
+    redone_names = list(redo_names[:actual])
+    for i in range(actual):
+        doc.redo()
+    doc.recompute()
+
+    return ToolResult(
+        success=True,
+        output=f"Redid {actual} operation(s): {', '.join(redone_names)}",
+        data={"steps": actual, "redone": redone_names},
+    )
+
+
+REDO = ToolDefinition(
+    name="redo",
+    description="Redo previously undone operations.",
+    category="general",
+    parameters=[
+        ToolParam("steps", "integer", "Number of operations to redo", required=False, default=1),
+    ],
+    handler=_handle_redo,
+)
+
+
+def _handle_undo_history() -> ToolResult:
+    """Show the undo/redo stack."""
+    import FreeCAD as App
+
+    doc = App.ActiveDocument
+    if not doc:
+        return ToolResult(success=False, output="", error="No active document")
+
+    undo_names = list(doc.UndoNames) if hasattr(doc, "UndoNames") else []
+    redo_names = list(doc.RedoNames) if hasattr(doc, "RedoNames") else []
+
+    lines = []
+    if undo_names:
+        lines.append(f"**Undo stack ({len(undo_names)}):** (most recent first)")
+        for i, name in enumerate(undo_names):
+            lines.append(f"  {i + 1}. {name}")
+    else:
+        lines.append("Undo stack is empty.")
+
+    if redo_names:
+        lines.append(f"**Redo stack ({len(redo_names)}):**")
+        for i, name in enumerate(redo_names):
+            lines.append(f"  {i + 1}. {name}")
+
+    return ToolResult(
+        success=True,
+        output="\n".join(lines),
+        data={"undo": undo_names, "redo": redo_names},
+    )
+
+
+UNDO_HISTORY = ToolDefinition(
+    name="undo_history",
+    description=(
+        "Show the undo/redo stack with named transactions. Use this to "
+        "see what can be undone or redone before calling undo/redo."
+    ),
+    category="query",
+    parameters=[],
+    handler=_handle_undo_history,
 )
 
 
@@ -3059,6 +3178,8 @@ ALL_TOOLS = [
     EXPORT_MODEL,
     EXECUTE_CODE,
     UNDO,
+    REDO,
+    UNDO_HISTORY,
     CAPTURE_VIEWPORT,
     SET_VIEW,
     ZOOM_OBJECT,
