@@ -334,6 +334,32 @@ class SettingsDialog(QDialog):
         user_tools_group.setLayout(user_tools_layout)
         layout.addWidget(user_tools_group)
 
+        # Skills group
+        skills_group = QGroupBox(translate("SettingsDialog", "Skills"))
+        skills_layout = QVBoxLayout()
+
+        self.skills_list = QListWidget()
+        self.skills_list.setMaximumHeight(120)
+        skills_layout.addWidget(self.skills_list)
+
+        skills_btn_layout = QHBoxLayout()
+        self._skills_reset_btn = QPushButton(translate("SettingsDialog", "Reset to Built-in"))
+        self._skills_reset_btn.setToolTip(
+            translate("SettingsDialog",
+                      "Delete the user copy and revert to the built-in version"))
+        self._skills_reset_btn.clicked.connect(self._reset_skill_to_builtin)
+        skills_btn_layout.addWidget(self._skills_reset_btn)
+
+        skills_reload_btn = QPushButton(translate("SettingsDialog", "Refresh"))
+        skills_reload_btn.clicked.connect(self._refresh_skills_list)
+        skills_btn_layout.addWidget(skills_reload_btn)
+
+        skills_btn_layout.addStretch()
+        skills_layout.addLayout(skills_btn_layout)
+
+        skills_group.setLayout(skills_layout)
+        layout.addWidget(skills_group)
+
         # Hooks group
         hooks_group = QGroupBox(translate("SettingsDialog", "Hooks"))
         hooks_layout = QVBoxLayout()
@@ -455,6 +481,12 @@ class SettingsDialog(QDialog):
         self.scan_macros_cb.setChecked(cfg.scan_freecad_macros)
         self._cfg = cfg
         self._load_user_tools_list()
+
+        # Skills
+        self._skills_status = []
+        self._refresh_skills_list()
+        self.skills_list.currentRowChanged.connect(
+            lambda _: self._update_skills_reset_btn())
 
         # Hooks
         self._refresh_hooks_list()
@@ -889,6 +921,72 @@ class SettingsDialog(QDialog):
         except Exception:
             pass
         self._refresh_hooks_list()
+
+
+    # ── Skills management ──────────────────────────────────────
+
+    def _refresh_skills_list(self):
+        """Populate the skills list with status indicators."""
+        from ..extensions.skills import SkillsRegistry
+
+        self.skills_list.clear()
+        self._skills_status = SkillsRegistry.get_skill_status()
+
+        for info in self._skills_status:
+            source = info["source"]
+            name = info["name"]
+            desc = info["description"]
+
+            if source == "modified":
+                icon = "\u26a0"  # ⚠
+                tag = "modified"
+            elif source == "user":
+                icon = "\u2606"  # ☆
+                tag = "user"
+            else:
+                icon = "\u2713"  # ✓
+                tag = "built-in"
+
+            label = f"{icon} {name} ({tag})"
+            if desc:
+                label += f" — {desc}"
+            self.skills_list.addItem(label)
+
+        self._update_skills_reset_btn()
+
+    def _update_skills_reset_btn(self):
+        """Enable/disable the reset button based on selection."""
+        idx = self.skills_list.currentRow()
+        can_reset = False
+        if 0 <= idx < len(self._skills_status):
+            info = self._skills_status[idx]
+            # Can reset if there's a user copy AND a built-in exists
+            can_reset = info["has_user_copy"] and bool(info["builtin_path"])
+        self._skills_reset_btn.setEnabled(can_reset)
+
+    def _reset_skill_to_builtin(self):
+        """Reset the selected skill to its built-in version."""
+        idx = self.skills_list.currentRow()
+        if idx < 0 or idx >= len(self._skills_status):
+            return
+
+        info = self._skills_status[idx]
+        name = info["name"]
+
+        reply = QMessageBox.question(
+            self,
+            translate("SettingsDialog", "Reset Skill"),
+            translate("SettingsDialog",
+                      f"Delete user copy of '{name}' and revert to the built-in version?"),
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No,
+        )
+        if reply != QMessageBox.Yes:
+            return
+
+        from ..extensions.skills import SkillsRegistry
+        if SkillsRegistry.reset_to_builtin(name):
+            self._refresh_skills_list()
 
 
 class _AddMCPServerDialog(QDialog):

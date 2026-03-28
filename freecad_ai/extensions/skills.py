@@ -8,9 +8,11 @@ Skills are user-level instruction/action sets stored under
 Skills can be invoked via /command in the chat input.
 """
 
+import hashlib
 import importlib.util
 import os
 import re
+import shutil
 from dataclasses import dataclass, field
 
 from ..config import SKILLS_DIR
@@ -211,3 +213,101 @@ class SkillsRegistry:
             return {"error": f"Skill handler error: {e}"}
 
         return None
+
+    @staticmethod
+    def get_skill_status() -> list[dict]:
+        """Return status info for all skills across built-in and user dirs.
+
+        Each entry: {"name", "description", "source", "has_user_copy",
+                     "is_modified", "builtin_path", "user_path"}
+
+        source: "built-in", "user", or "modified" (user copy differs from built-in)
+        """
+        results = []
+        builtin_skills = {}
+        user_skills = {}
+
+        # Scan built-in
+        if os.path.isdir(BUILTIN_SKILLS_DIR):
+            for entry in sorted(os.listdir(BUILTIN_SKILLS_DIR)):
+                skill_file = os.path.join(BUILTIN_SKILLS_DIR, entry, "SKILL.md")
+                if os.path.isfile(skill_file):
+                    builtin_skills[entry] = skill_file
+
+        # Scan user
+        if os.path.isdir(SKILLS_DIR):
+            for entry in sorted(os.listdir(SKILLS_DIR)):
+                skill_file = os.path.join(SKILLS_DIR, entry, "SKILL.md")
+                if os.path.isfile(skill_file):
+                    user_skills[entry] = skill_file
+
+        all_names = sorted(set(builtin_skills) | set(user_skills))
+
+        for name in all_names:
+            b_path = builtin_skills.get(name)
+            u_path = user_skills.get(name)
+
+            # Read description from whichever is active (user overrides built-in)
+            active_path = u_path or b_path
+            description = ""
+            try:
+                with open(active_path, "r", encoding="utf-8") as f:
+                    content = f.read()
+                body = content
+                if content.startswith("---\n"):
+                    end = content.find("\n---\n", 4)
+                    if end != -1:
+                        body = content[end + 5:]
+                for line in body.splitlines():
+                    line = line.strip()
+                    if line and not line.startswith("#"):
+                        description = line[:80]
+                        break
+            except Exception:
+                pass
+
+            if b_path and u_path:
+                is_modified = _file_hash(b_path) != _file_hash(u_path)
+                source = "modified" if is_modified else "built-in"
+            elif b_path:
+                source = "built-in"
+            else:
+                source = "user"
+
+            results.append({
+                "name": name,
+                "description": description,
+                "source": source,
+                "has_user_copy": u_path is not None,
+                "is_modified": source == "modified",
+                "builtin_path": b_path or "",
+                "user_path": u_path or "",
+            })
+
+        return results
+
+    @staticmethod
+    def reset_to_builtin(name: str) -> bool:
+        """Delete the user copy of a skill, reverting to the built-in version.
+
+        Returns True if the user copy was deleted.
+        """
+        user_skill_dir = os.path.join(SKILLS_DIR, name)
+        builtin_skill = os.path.join(BUILTIN_SKILLS_DIR, name, "SKILL.md")
+
+        if not os.path.isfile(builtin_skill):
+            return False
+
+        if os.path.isdir(user_skill_dir):
+            shutil.rmtree(user_skill_dir)
+            return True
+        return False
+
+
+def _file_hash(path: str) -> str:
+    """Return MD5 hex digest of a file's contents."""
+    try:
+        with open(path, "rb") as f:
+            return hashlib.md5(f.read()).hexdigest()
+    except Exception:
+        return ""
