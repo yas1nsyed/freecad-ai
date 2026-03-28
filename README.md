@@ -8,7 +8,7 @@ An AI-powered assistant workbench for FreeCAD that generates and executes Python
 
 - **Chat interface** — dock widget with streaming LLM responses
 - **Plan / Act modes** — review code before execution (Plan) or auto-execute (Act)
-- **Tool calling** — 34 structured FreeCAD operations (Act mode) for safer, more reliable modeling
+- **Tool calling** — 37 structured FreeCAD operations (Act mode) for safer, more reliable modeling
 - **Skills** — reusable instruction sets the model invokes autonomously or via `/command` (enclosure, gear, fastener holes, etc.)
 - **Skill optimizer** — automatically improve skill instructions via iterative test-evaluate-modify loop (`/optimize-skill`)
 - **Hooks** — user-defined Python hooks for lifecycle events (block tools, modify input, log activity)
@@ -136,14 +136,18 @@ Tool calling is enabled by default. Disable it by setting `enable_tools: false` 
 | `create_snap_tabs` | Add snap tabs on a lid lip (pairs with ridge) |
 | `create_enclosure_lid` | Generate a snap-fit enclosure lid with correct dimensions |
 | `measure` | Volume, area, bounding box, distance, edge listing |
+| `describe_model` | Comprehensive geometry summary: dimensions, wall thickness, hollow/solid detection |
 | `get_document_state` | Inspect current objects and properties |
 | `modify_property` | Change any object property |
 | `export_model` | Export to STL, STEP, or IGES |
 | `execute_code` | Fallback: run arbitrary Python |
-| `undo` | Undo last N operations |
+| `undo` | Undo last N operations, or undo until a named transaction |
+| `redo` | Redo previously undone operations |
+| `undo_history` | Show the undo/redo stack with named transactions |
 | `capture_viewport` | Save a screenshot of the 3D viewport |
 | `set_view` | Set camera orientation (front, top, isometric, etc.) |
 | `zoom_object` | Zoom the viewport to a specific object |
+| `use_skill` | Load a skill's instructions for complex tasks (enclosure, gear, etc.) |
 | `select_geometry` | Interactive viewport picking for edges, faces, vertices |
 
 ### Skills
