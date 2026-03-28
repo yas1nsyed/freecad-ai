@@ -1361,21 +1361,26 @@ def _handle_create_inner_ridge(
     import Part
     import Sketcher
 
+    def _add_rect(sketch, x, y, w, h):
+        """Add a closed rectangle to the sketch at (x, y) with size (w, h)."""
+        g = sketch.GeometryCount
+        sketch.addGeometry(Part.LineSegment(App.Vector(x, y, 0), App.Vector(x + w, y, 0)))
+        sketch.addGeometry(Part.LineSegment(App.Vector(x + w, y, 0), App.Vector(x + w, y + h, 0)))
+        sketch.addGeometry(Part.LineSegment(App.Vector(x + w, y + h, 0), App.Vector(x, y + h, 0)))
+        sketch.addGeometry(Part.LineSegment(App.Vector(x, y + h, 0), App.Vector(x, y, 0)))
+        sketch.addConstraint(Sketcher.Constraint("Coincident", g, 2, g + 1, 1))
+        sketch.addConstraint(Sketcher.Constraint("Coincident", g + 1, 2, g + 2, 1))
+        sketch.addConstraint(Sketcher.Constraint("Coincident", g + 2, 2, g + 3, 1))
+        sketch.addConstraint(Sketcher.Constraint("Coincident", g + 3, 2, g, 1))
+
     def do(doc):
         body = _get_object(doc, body_name)
         if not body:
-            return ToolResult(success=False, output="", error=f"Body '{body_name}' not found")
+            hint = _suggest_similar(doc, body_name, "Body")
+            return ToolResult(success=False, output="", error=f"Body '{body_name}' not found.{hint}")
 
         T = wall_thickness
         rw = ridge_width
-
-        # Outer rectangle = inner wall of enclosure
-        ox, oy = T, T
-        ow, oh = length - 2 * T, width - 2 * T
-
-        # Inner rectangle = inset by ridge_width
-        ix, iy = T + rw, T + rw
-        iw, ih = length - 2 * T - 2 * rw, width - 2 * T - 2 * rw
 
         sketch = body.newObject("Sketcher::SketchObject", label + "Sketch")
         xy_plane = _get_body_plane(body, "XY")
@@ -1385,25 +1390,10 @@ def _handle_create_inner_ridge(
         sketch.AttachmentOffset = App.Placement(
             App.Vector(0, 0, z_position), App.Rotation())
 
-        # Outer rectangle
-        sketch.addGeometry(Part.LineSegment(App.Vector(ox, oy, 0), App.Vector(ox + ow, oy, 0)))
-        sketch.addGeometry(Part.LineSegment(App.Vector(ox + ow, oy, 0), App.Vector(ox + ow, oy + oh, 0)))
-        sketch.addGeometry(Part.LineSegment(App.Vector(ox + ow, oy + oh, 0), App.Vector(ox, oy + oh, 0)))
-        sketch.addGeometry(Part.LineSegment(App.Vector(ox, oy + oh, 0), App.Vector(ox, oy, 0)))
-        sketch.addConstraint(Sketcher.Constraint("Coincident", 0, 2, 1, 1))
-        sketch.addConstraint(Sketcher.Constraint("Coincident", 1, 2, 2, 1))
-        sketch.addConstraint(Sketcher.Constraint("Coincident", 2, 2, 3, 1))
-        sketch.addConstraint(Sketcher.Constraint("Coincident", 3, 2, 0, 1))
-
-        # Inner rectangle (creates the ring shape)
-        sketch.addGeometry(Part.LineSegment(App.Vector(ix, iy, 0), App.Vector(ix + iw, iy, 0)))
-        sketch.addGeometry(Part.LineSegment(App.Vector(ix + iw, iy, 0), App.Vector(ix + iw, iy + ih, 0)))
-        sketch.addGeometry(Part.LineSegment(App.Vector(ix + iw, iy + ih, 0), App.Vector(ix, iy + ih, 0)))
-        sketch.addGeometry(Part.LineSegment(App.Vector(ix, iy + ih, 0), App.Vector(ix, iy, 0)))
-        sketch.addConstraint(Sketcher.Constraint("Coincident", 4, 2, 5, 1))
-        sketch.addConstraint(Sketcher.Constraint("Coincident", 5, 2, 6, 1))
-        sketch.addConstraint(Sketcher.Constraint("Coincident", 6, 2, 7, 1))
-        sketch.addConstraint(Sketcher.Constraint("Coincident", 7, 2, 4, 1))
+        # Outer rectangle = inner wall of enclosure
+        _add_rect(sketch, T, T, length - 2 * T, width - 2 * T)
+        # Inner rectangle = inset by ridge_width (creates ring shape)
+        _add_rect(sketch, T + rw, T + rw, length - 2 * T - 2 * rw, width - 2 * T - 2 * rw)
 
         doc.recompute()
 
