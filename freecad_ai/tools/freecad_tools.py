@@ -1249,9 +1249,9 @@ def _handle_describe_model(object_name: str) -> ToolResult:
             for feat in features:
                 feat_info = f"  - {feat.Name} ({feat.TypeId})"
                 if hasattr(feat, "Length"):
-                    feat_info += f" — Length: {feat.Length:.1f} mm"
+                    feat_info += f" — Length: {float(feat.Length):.1f} mm"
                 if hasattr(feat, "Radius"):
-                    feat_info += f" — Radius: {feat.Radius:.1f} mm"
+                    feat_info += f" — Radius: {float(feat.Radius):.1f} mm"
                 lines.append(feat_info)
 
     output = "\n".join(lines)
