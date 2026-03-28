@@ -12,7 +12,11 @@ import json
 import logging
 import os
 import random
-import ssl
+try:
+    import ssl
+    _HAS_SSL = True
+except ImportError:
+    _HAS_SSL = False
 import subprocess
 import urllib.request
 import urllib.error
@@ -131,8 +135,18 @@ class LLMClient:
         self.thinking = thinking  # "off", "on", "extended"
         self.api_style = get_api_style(provider_name)
 
-        # SSL context for HTTPS requests
-        self._ssl_ctx = ssl.create_default_context()
+        # SSL context for HTTPS requests.
+        # Snap-packaged FreeCAD may lack the _ssl C extension, in which
+        # case we fall back to no certificate verification.  The connection
+        # is still TLS-encrypted; only server identity is unverified.
+        if _HAS_SSL:
+            try:
+                self._ssl_ctx = ssl.create_default_context()
+            except Exception:
+                # Cert store unavailable (e.g. snap sandbox)
+                self._ssl_ctx = ssl._create_unverified_context()
+        else:
+            self._ssl_ctx = None
 
     # ── API key resolution ─────────────────────────────────────
 
@@ -645,6 +659,12 @@ class LLMClient:
 
         try:
             ctx = self._ssl_ctx if url.startswith("https") else None
+            if url.startswith("https") and not _HAS_SSL:
+                raise LLMError(
+                    "HTTPS is not available (Python _ssl module missing). "
+                    "This can happen with snap-packaged FreeCAD. "
+                    "Use Ollama (http://localhost:11434) or fix the snap's Python SSL support."
+                )
             with urllib.request.urlopen(req, context=ctx, timeout=timeout) as resp:
                 return json.loads(resp.read().decode("utf-8"))
         except urllib.error.HTTPError as e:
@@ -668,6 +688,12 @@ class LLMClient:
 
         try:
             ctx = self._ssl_ctx if url.startswith("https") else None
+            if url.startswith("https") and not _HAS_SSL:
+                raise LLMError(
+                    "HTTPS is not available (Python _ssl module missing). "
+                    "This can happen with snap-packaged FreeCAD. "
+                    "Use Ollama (http://localhost:11434) or fix the snap's Python SSL support."
+                )
             resp = urllib.request.urlopen(req, context=ctx, timeout=timeout)
         except urllib.error.HTTPError as e:
             error_body = ""
