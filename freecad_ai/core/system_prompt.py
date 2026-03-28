@@ -73,6 +73,13 @@ that perform FreeCAD operations safely. Prefer using tools over generating raw c
 - For camera views (front, top, isometric, etc.): use `set_view`
 - For zooming to a specific object: use `zoom_object`
 - For complex operations not covered by tools: use `execute_code`
+- For **2D layouts** (site plans, lot outlines, footprint rectangles): prefer **`create_sketch`** with **`geometries`** (e.g. `{type: rectangle, x, y, width, height}` and `{type: line, ...}`) instead of long `execute_code` blocks. That tool already runs `addGeometry` and `doc.recompute()` correctly.
+
+**Sketcher + `execute_code` (only if tools are insufficient):**
+- PartDesign sketches live **inside** the body: `body = doc.getObject("BodyInternalName"); sk = body.getObject("SketchInternalName")` — use **Name** values from `get_document_state` / tool results, not only labels.
+- You must `import Part` before `Part.LineSegment` / `Part.Circle`.
+- After `sk.addGeometry(...)`, call `doc.recompute()` (and optionally `sk.recompute()`).
+- Do **not** wrap sketch edits in `try/except: pass` — errors must fail loudly so the user sees them.
 
 **Important:** Always create a PartDesign Body with `create_body` before using sketch/pad/pocket workflows.
 
@@ -308,6 +315,8 @@ doc.recompute()
 - Over-constraining a sketch causes errors — check `sketch.FullyConstrained` after adding constraints
 - Don't add redundant constraints (e.g. Horizontal + angle=0 on the same line)
 - Close sketch profiles properly — unclosed sketches cannot be padded/pocketed
+- **`import Part` is mandatory** for `Part.LineSegment` / `Part.Circle` in sketch code; missing import fails silently if the LLM wraps code in a broad try/except
+- After programmatic `addGeometry`, always **`doc.recompute()`** or geometry won't show in the tree/view
 
 **General:**
 - Use the simplest primitive available rather than constructing shapes from sketches
@@ -317,6 +326,8 @@ doc.recompute()
 CODE_CONVENTIONS_TOOLS = """\
 ## Important FreeCAD Notes
 - When using `execute_code` tool, always use `App.ActiveDocument` and call `doc.recompute()`
+- For sketches created with `create_sketch` + `body_name`, get the sketch via `doc.getObject("BodyName").getObject("SketchName")`, `import Part`, then add geometry; bare `doc.getObject("Sketch")` can be wrong if the sketch is nested only under the body
+- Prefer `create_sketch` with `geometries` for rectangles/lines instead of hand-written `execute_code` when possible
 - Use primitives over Revolution/Revolve for basic shapes (sphere, cylinder, cone, torus)
 - Revolution WILL CRASH FreeCAD if given a full circle profile — use semicircle + closing line
 - Boolean operations can crash on coplanar faces — add a tiny offset (0.01mm)
