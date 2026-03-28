@@ -1148,6 +1148,131 @@ MEASURE = ToolDefinition(
 )
 
 
+# ── describe_model ──────────────────────────────────────────
+
+def _handle_describe_model(object_name: str) -> ToolResult:
+    """Return a comprehensive geometry summary of an object."""
+    import FreeCAD as App
+
+    doc = App.ActiveDocument
+    if not doc:
+        return ToolResult(success=False, output="", error="No active document")
+
+    obj = _get_object(doc, object_name)
+    if not obj:
+        hint = _suggest_similar(doc, object_name)
+        return ToolResult(success=False, output="", error=f"Object '{object_name}' not found.{hint}")
+
+    shape = getattr(obj, "Shape", None)
+    if not shape:
+        return ToolResult(success=False, output="",
+                          error=f"Object '{object_name}' has no Shape")
+
+    lines = [f"## Geometry of '{obj.Label}' ({obj.TypeId})"]
+
+    # Bounding box
+    bb = shape.BoundBox
+    lines.append(f"**Bounding box:** {bb.XLength:.2f} x {bb.YLength:.2f} x {bb.ZLength:.2f} mm")
+    lines.append(f"  X: [{bb.XMin:.2f}, {bb.XMax:.2f}]  Y: [{bb.YMin:.2f}, {bb.YMax:.2f}]  Z: [{bb.ZMin:.2f}, {bb.ZMax:.2f}]")
+
+    # Volume and area
+    if shape.Volume > 0:
+        lines.append(f"**Volume:** {shape.Volume:.1f} mm\u00b3")
+    if shape.Area > 0:
+        lines.append(f"**Surface area:** {shape.Area:.1f} mm\u00b2")
+
+    # Solid check
+    lines.append(f"**Valid:** {shape.isValid()}")
+    lines.append(f"**Solids:** {len(shape.Solids)}  **Shells:** {len(shape.Shells)}  **Faces:** {len(shape.Faces)}  **Edges:** {len(shape.Edges)}")
+
+    # Hollow detection via comparing volume to bounding box volume
+    bb_vol = bb.XLength * bb.YLength * bb.ZLength
+    if bb_vol > 0 and shape.Volume > 0:
+        fill_ratio = shape.Volume / bb_vol
+        if fill_ratio < 0.5:
+            lines.append(f"**Likely hollow** (fill ratio: {fill_ratio:.1%})")
+        else:
+            lines.append(f"**Likely solid** (fill ratio: {fill_ratio:.1%})")
+
+    # Wall thickness estimation via ray casting from center
+    try:
+        center = App.Vector(bb.Center)
+        thicknesses = []
+        for direction in [App.Vector(1, 0, 0), App.Vector(0, 1, 0), App.Vector(0, 0, 1),
+                          App.Vector(-1, 0, 0), App.Vector(0, -1, 0), App.Vector(0, 0, -1)]:
+            # Cast ray from center outward, find first two face intersections
+            # to estimate wall thickness
+            try:
+                hits = shape.distToShape(
+                    shape.__class__.makeBox(0.01, 0.01, 0.01,
+                                           center + direction * 500)
+                )
+            except Exception:
+                continue
+        # Alternative: use section cuts to estimate wall thickness
+        for axis, offset in [("XY", bb.ZMax), ("XZ", bb.YMax), ("YZ", bb.XMax)]:
+            try:
+                if axis == "XY":
+                    plane_base = App.Vector(0, 0, offset - 0.1)
+                    plane_norm = App.Vector(0, 0, 1)
+                elif axis == "XZ":
+                    plane_base = App.Vector(0, offset - 0.1, 0)
+                    plane_norm = App.Vector(0, 1, 0)
+                else:
+                    plane_base = App.Vector(offset - 0.1, 0, 0)
+                    plane_norm = App.Vector(1, 0, 0)
+                wires = shape.slice(plane_norm, offset - 0.1)
+                if len(wires) >= 2:
+                    # Two concentric wires = hollow with walls
+                    bbs = sorted([w.BoundBox for w in wires],
+                                 key=lambda b: b.XLength * b.YLength, reverse=True)
+                    if len(bbs) >= 2:
+                        outer = bbs[0]
+                        inner = bbs[1]
+                        wall_x = (outer.XLength - inner.XLength) / 2
+                        wall_y = (outer.YLength - inner.YLength) / 2
+                        if wall_x > 0.1 and wall_y > 0.1:
+                            thicknesses.append(min(wall_x, wall_y))
+            except Exception:
+                continue
+        if thicknesses:
+            avg_wall = sum(thicknesses) / len(thicknesses)
+            lines.append(f"**Estimated wall thickness:** ~{avg_wall:.1f} mm")
+    except Exception:
+        pass
+
+    # PartDesign body features
+    if obj.TypeId == "PartDesign::Body" and hasattr(obj, "Group"):
+        features = [m for m in obj.Group if not m.TypeId.startswith("App::")]
+        if features:
+            lines.append(f"**Features ({len(features)}):**")
+            for feat in features:
+                feat_info = f"  - {feat.Name} ({feat.TypeId})"
+                if hasattr(feat, "Length"):
+                    feat_info += f" — Length: {feat.Length:.1f} mm"
+                if hasattr(feat, "Radius"):
+                    feat_info += f" — Radius: {feat.Radius:.1f} mm"
+                lines.append(feat_info)
+
+    output = "\n".join(lines)
+    return ToolResult(success=True, output=output, data={"label": obj.Label})
+
+
+DESCRIBE_MODEL = ToolDefinition(
+    name="describe_model",
+    description=(
+        "Get a comprehensive geometry summary of an object: dimensions, volume, "
+        "face/edge counts, hollow/solid detection, estimated wall thickness, "
+        "and PartDesign feature list. Use this to inspect or verify a model."
+    ),
+    category="query",
+    parameters=[
+        ToolParam("object_name", "string", "Internal name or label of the object to describe"),
+    ],
+    handler=_handle_describe_model,
+)
+
+
 # ── get_document_state ──────────────────────────────────────
 
 def _handle_get_document_state() -> ToolResult:
@@ -2928,6 +3053,7 @@ ALL_TOOLS = [
     MIRROR_FEATURE,
     MULTI_TRANSFORM,
     MEASURE,
+    DESCRIBE_MODEL,
     GET_DOCUMENT_STATE,
     MODIFY_PROPERTY,
     EXPORT_MODEL,
