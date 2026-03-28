@@ -309,6 +309,10 @@ freecad-ai/
         └── freecad_ai.svg
 ```
 
+## Contributing
+
+Contributions are welcome! See [CONTRIBUTING.md](CONTRIBUTING.md) for how to set up a dev environment, submit pull requests, and create new skills or providers.
+
 ## License
 
 - **Code:** LGPL-2.1 — see [LICENSE-CODE](LICENSE-CODE)
