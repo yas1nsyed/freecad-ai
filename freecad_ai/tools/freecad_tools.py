@@ -31,10 +31,14 @@ def _coerce_str_list(value):
 
 def _with_undo(label: str, func):
     """Run func inside a FreeCAD undo transaction. Returns ToolResult."""
-    import FreeCAD as App
-    doc = App.ActiveDocument
+    from ..core.active_document import get_synced_active_document
+    doc = get_synced_active_document()
     if not doc:
-        return ToolResult(success=False, output="", error="No active document")
+        return ToolResult(
+            success=False,
+            output="",
+            error="No active document — open a document in FreeCAD or select its tab.",
+        )
     doc.openTransaction(label)
     try:
         result = func(doc)
@@ -1064,8 +1068,9 @@ def _handle_measure(
 ) -> ToolResult:
     """Measure properties of objects (volume, area, bounding box, distance)."""
     import FreeCAD as App
+    from ..core.active_document import get_synced_active_document
 
-    doc = App.ActiveDocument
+    doc = get_synced_active_document()
     if not doc:
         return ToolResult(success=False, output="", error="No active document")
 
@@ -1153,8 +1158,9 @@ MEASURE = ToolDefinition(
 def _handle_describe_model(object_name: str) -> ToolResult:
     """Return a comprehensive geometry summary of an object."""
     import FreeCAD as App
+    from ..core.active_document import get_synced_active_document
 
-    doc = App.ActiveDocument
+    doc = get_synced_active_document()
     if not doc:
         return ToolResult(success=False, output="", error="No active document")
 
@@ -1277,14 +1283,17 @@ DESCRIBE_MODEL = ToolDefinition(
 
 def _handle_get_document_state() -> ToolResult:
     """Get the current document state — all objects and their properties."""
+    from ..core.active_document import get_synced_active_document
     from ..core.context import get_document_context
-    ctx = get_document_context()
-    if not ctx:
+
+    if not get_synced_active_document():
         return ToolResult(
-            success=True,
-            output="No document is open, or the document is empty.",
-            data={"objects": []},
+            success=False,
+            output="",
+            error="No active document — open a document in FreeCAD or select its tab.",
+            data={},
         )
+    ctx = get_document_context()
     return ToolResult(
         success=True,
         output=ctx,
@@ -1355,8 +1364,9 @@ def _handle_export_model(
     import FreeCAD as App
     import Part
     import Mesh
+    from ..core.active_document import get_synced_active_document
 
-    doc = App.ActiveDocument
+    doc = get_synced_active_document()
     if not doc:
         return ToolResult(success=False, output="", error="No active document")
 
@@ -1409,11 +1419,17 @@ EXPORT_MODEL = ToolDefinition(
 
 def _handle_execute_code(code: str) -> ToolResult:
     """Execute arbitrary Python code (fallback tool)."""
+    from ..core.active_document import resolve_active_document
     from ..core.executor import execute_code
+
     result = execute_code(code)
     if result.success:
         output = result.stdout.strip() if result.stdout.strip() else "Code executed successfully"
-        return ToolResult(success=True, output=output, data={"stdout": result.stdout})
+        doc = resolve_active_document()
+        data = {"stdout": result.stdout}
+        if doc:
+            data["document"] = doc.Name
+        return ToolResult(success=True, output=output, data=data)
     else:
         return ToolResult(success=False, output=result.stdout, error=result.stderr)
 
@@ -1434,8 +1450,9 @@ EXECUTE_CODE = ToolDefinition(
 def _handle_undo(steps: int = 1, until: str = "") -> ToolResult:
     """Undo operations. Either N steps or until a named transaction is reached."""
     import FreeCAD as App
+    from ..core.active_document import get_synced_active_document
 
-    doc = App.ActiveDocument
+    doc = get_synced_active_document()
     if not doc:
         return ToolResult(success=False, output="", error="No active document")
 
@@ -1508,8 +1525,9 @@ UNDO = ToolDefinition(
 def _handle_redo(steps: int = 1) -> ToolResult:
     """Redo previously undone operations."""
     import FreeCAD as App
+    from ..core.active_document import get_synced_active_document
 
-    doc = App.ActiveDocument
+    doc = get_synced_active_document()
     if not doc:
         return ToolResult(success=False, output="", error="No active document")
 
@@ -1548,8 +1566,9 @@ REDO = ToolDefinition(
 def _handle_undo_history() -> ToolResult:
     """Show the undo/redo stack."""
     import FreeCAD as App
+    from ..core.active_document import get_synced_active_document
 
-    doc = App.ActiveDocument
+    doc = get_synced_active_document()
     if not doc:
         return ToolResult(success=False, output="", error="No active document")
 
@@ -2902,8 +2921,9 @@ def _handle_zoom_object(object_name: str) -> ToolResult:
     """Zoom the viewport to focus on a specific object."""
     import FreeCAD as App
     import FreeCADGui as Gui
+    from ..core.active_document import get_synced_active_document
 
-    doc = App.ActiveDocument
+    doc = get_synced_active_document()
     if not doc:
         return ToolResult(success=False, output="", error="No active document")
 
