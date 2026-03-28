@@ -297,6 +297,16 @@ class LLMClient:
             headers["Authorization"] = f"Bearer {resolved_key}"
         return headers
 
+    def _openai_is_gpt5_family(self) -> bool:
+        """Official OpenAI Chat Completions: gpt-5.x uses max_completion_tokens (not max_tokens)
+        and rejects explicit non-default temperature — omit temperature so the API default applies."""
+        if self.provider_name != "openai":
+            return False
+        return (self.model or "").lower().startswith("gpt-5")
+
+    def _openai_use_max_completion_tokens(self) -> bool:
+        return self._openai_is_gpt5_family()
+
     def _openai_body(self, messages: list[dict], system: str, stream: bool,
                      tools: list[dict] | None = None) -> dict:
         msgs = []
@@ -315,10 +325,15 @@ class LLMClient:
         body = {
             "model": self.model,
             "messages": msgs,
-            "max_tokens": self.max_tokens,
-            "temperature": self.temperature,
             "stream": stream,
         }
+        # gpt-5.x rejects non-default temperature; omit so the API uses its default (1).
+        if not self._openai_is_gpt5_family():
+            body["temperature"] = self.temperature
+        if self._openai_use_max_completion_tokens():
+            body["max_completion_tokens"] = self.max_tokens
+        else:
+            body["max_tokens"] = self.max_tokens
         if tools:
             body["tools"] = tools
             body["tool_choice"] = "auto"
