@@ -315,9 +315,9 @@ class LLMClient:
         body = {
             "model": self.model,
             "messages": msgs,
-            "max_tokens": self.max_tokens,
             "temperature": self.temperature,
             "stream": stream,
+            "max_tokens": self.max_tokens,
         }
         if tools:
             body["tools"] = tools
@@ -351,6 +351,11 @@ class LLMClient:
             body["n"] = 1
             body["presence_penalty"] = 0.0
             body["frequency_penalty"] = 0.0
+        elif self.provider_name == "openai" and (self.model or "").lower().startswith("gpt-5"):
+            # Official OpenAI Chat Completions: gpt-5.x rejects max_tokens and non-default temperature.
+            body.pop("temperature", None)
+            if "max_tokens" in body:
+                body["max_completion_tokens"] = body.pop("max_tokens")
 
     def _send_openai(self, messages: list[dict], system: str, stream: bool = False) -> str:
         body = self._openai_body(messages, system, stream=False)

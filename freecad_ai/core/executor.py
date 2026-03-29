@@ -14,6 +14,7 @@ import io
 import json
 import os
 import re
+import shutil
 import signal
 import subprocess
 import sys
@@ -45,7 +46,6 @@ def _find_freecad_cmd() -> str:
     Handles AppImages, wrapper scripts, and standard installs.
     """
     import glob
-    import shutil
 
     # 1. Look for AppImages in ~/bin (preferred — direct binary, not a wrapper script)
     appimage_patterns = [
@@ -76,7 +76,7 @@ def _find_freecad_cmd() -> str:
     return ""
 
 
-def _sandbox_test(code: str, timeout: int = 15) -> tuple:
+def _sandbox_test(code: str, timeout: int = 15, document_path: str | None = None) -> tuple:
     """Test code in a headless FreeCAD subprocess.
 
     Returns (safe: bool, error_message: str).
@@ -89,12 +89,23 @@ def _sandbox_test(code: str, timeout: int = 15) -> tuple:
     result_file = tempfile.mktemp(suffix=".json")
     script_file = tempfile.mktemp(suffix=".py")
 
-    # Write a test harness that runs the code in a fresh document
+    if document_path:
+        open_block = (
+            "    App.openDocument({path!r})\n"
+            "    doc = App.ActiveDocument\n"
+            "    if doc is None:\n"
+            "        raise RuntimeError('Sandbox: openDocument did not set ActiveDocument')\n"
+            "    App.setActiveDocument(doc.Name)"
+        ).format(path=document_path)
+    else:
+        open_block = '    doc = App.newDocument("SandboxTest")'
+
+    # Harness: run user code, then close all documents without saving (temp copy is disposable).
     harness = '''import sys, json, traceback
 result = {{"ok": False, "error": ""}}
 try:
     import FreeCAD as App
-    doc = App.newDocument("SandboxTest")
+{open_block}
     # --- user code ---
 {indented_code}
     # --- end user code ---
@@ -103,9 +114,16 @@ try:
 except Exception as e:
     result["error"] = traceback.format_exc()
 finally:
+    try:
+        import FreeCAD as App
+        for _dn in list(App.listDocuments().keys()):
+            App.closeDocument(_dn)
+    except Exception:
+        pass
     with open({result_path!r}, "w") as f:
         json.dump(result, f)
 '''.format(
+        open_block=open_block,
         indented_code="\n".join("    " + line for line in code.splitlines()),
         result_path=result_file,
     )
@@ -162,11 +180,9 @@ finally:
 def _auto_save(namespace: dict):
     """Save a recovery copy of the active document before executing code."""
     try:
-        app = namespace.get("App") or namespace.get("FreeCAD")
-        if not app or not app.ActiveDocument:
-            return
-        doc = app.ActiveDocument
-        if not doc.FileName:
+        from .active_document import resolve_active_document
+        doc = resolve_active_document()
+        if not doc or not doc.FileName:
             return  # Unsaved document, nothing to back up
         backup = doc.FileName + ".ai-backup"
         doc.saveAs(backup)
@@ -198,16 +214,55 @@ def execute_code(code: str, timeout: int = 30, sandbox: bool = True) -> Executio
             code=code,
         )
 
-    # Layer 2: Subprocess sandbox
+    from .active_document import get_synced_active_document, refresh_gui_for_document
+
+    # Layer 2: Subprocess sandbox — optional copy of saved document so getObject-style code validates safely
+    sandbox_copy_path = None
     if sandbox:
-        safe, sandbox_err = _sandbox_test(code, timeout=min(timeout, 15))
-        if not safe:
-            return ExecutionResult(
-                success=False,
-                stdout="",
-                stderr=sandbox_err,
-                code=code,
+        pre_doc = get_synced_active_document()
+        fn = getattr(pre_doc, "FileName", "") if pre_doc else ""
+        if fn and os.path.isfile(fn):
+            try:
+                fd, sandbox_copy_path = tempfile.mkstemp(suffix=".FCStd")
+                os.close(fd)
+                shutil.copy2(fn, sandbox_copy_path)
+            except OSError as e:
+                return ExecutionResult(
+                    success=False,
+                    stdout="",
+                    stderr=f"Sandbox: could not copy document for validation: {e}",
+                    code=code,
+                )
+        try:
+            safe, sandbox_err = _sandbox_test(
+                code, timeout=min(timeout, 15), document_path=sandbox_copy_path
             )
+            if not safe:
+                return ExecutionResult(
+                    success=False,
+                    stdout="",
+                    stderr=sandbox_err,
+                    code=code,
+                )
+        finally:
+            if sandbox_copy_path:
+                try:
+                    os.unlink(sandbox_copy_path)
+                except OSError:
+                    pass
+
+    target_doc = get_synced_active_document()
+    if target_doc is None:
+        return ExecutionResult(
+            success=False,
+            stdout="",
+            stderr=(
+                "No active document — open a document in FreeCAD or click "
+                "its tab so it is the focused window."
+            ),
+            code=code,
+        )
+    doc_name = target_doc.Name
 
     # Build execution namespace with FreeCAD modules
     namespace = _build_namespace()
@@ -223,7 +278,7 @@ def execute_code(code: str, timeout: int = 30, sandbox: bool = True) -> Executio
     sys.stdout = captured_out
     sys.stderr = captured_err
 
-    doc = _get_active_doc(namespace)
+    doc = target_doc
     success = True
     try:
         # Layer 3: Undo transaction
@@ -254,6 +309,13 @@ def execute_code(code: str, timeout: int = 30, sandbox: bool = True) -> Executio
         _recompute(namespace)
         if doc:
             doc.commitTransaction()
+        import FreeCAD as App
+        d = App.getDocument(doc_name)
+        if d is None:
+            raise RuntimeError(
+                "Target document is no longer available after execution."
+            )
+        refresh_gui_for_document(d)
     except Exception:
         success = False
         traceback.print_exc(file=captured_err)
@@ -316,14 +378,6 @@ def _validate_code(code: str) -> list[str]:
     return warnings
 
 
-def _get_active_doc(namespace: dict):
-    """Get the active FreeCAD document, if any."""
-    app = namespace.get("App") or namespace.get("FreeCAD")
-    if app and hasattr(app, "ActiveDocument"):
-        return app.ActiveDocument
-    return None
-
-
 def _build_namespace() -> dict:
     """Build a namespace dict with FreeCAD modules for code execution."""
     ns = {"__builtins__": __builtins__}
@@ -356,7 +410,8 @@ def _build_namespace() -> dict:
 
 
 def _recompute(namespace: dict):
-    """Recompute the active document if available."""
-    app = namespace.get("App") or namespace.get("FreeCAD")
-    if app and hasattr(app, "ActiveDocument") and app.ActiveDocument:
-        app.ActiveDocument.recompute()
+    """Recompute the GUI-aligned active document if available."""
+    from .active_document import resolve_active_document
+    doc = resolve_active_document()
+    if doc:
+        doc.recompute()

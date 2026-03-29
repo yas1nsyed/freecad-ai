@@ -16,9 +16,12 @@ def get_document_context() -> str:
     except ImportError:
         return "(FreeCAD not available — running outside FreeCAD)"
 
-    doc = App.ActiveDocument
+    from .active_document import resolve_active_document, sync_app_active_document
+
+    doc = resolve_active_document()
     if doc is None:
         return "No document is currently open."
+    sync_app_active_document(doc)
 
     lines = []
 

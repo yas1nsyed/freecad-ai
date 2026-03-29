@@ -31,10 +31,14 @@ def _coerce_str_list(value):
 
 def _with_undo(label: str, func):
     """Run func inside a FreeCAD undo transaction. Returns ToolResult."""
-    import FreeCAD as App
-    doc = App.ActiveDocument
+    from ..core.active_document import get_synced_active_document
+    doc = get_synced_active_document()
     if not doc:
-        return ToolResult(success=False, output="", error="No active document")
+        return ToolResult(
+            success=False,
+            output="",
+            error="No active document — open a document in FreeCAD or select its tab.",
+        )
     doc.openTransaction(label)
     try:
         result = func(doc)
@@ -1277,14 +1281,17 @@ DESCRIBE_MODEL = ToolDefinition(
 
 def _handle_get_document_state() -> ToolResult:
     """Get the current document state — all objects and their properties."""
+    import FreeCAD as App
     from ..core.context import get_document_context
-    ctx = get_document_context()
-    if not ctx:
+
+    if not App.ActiveDocument:
         return ToolResult(
-            success=True,
-            output="No document is open, or the document is empty.",
-            data={"objects": []},
+            success=False,
+            output="",
+            error="No active document",
+            data={},
         )
+    ctx = get_document_context()
     return ToolResult(
         success=True,
         output=ctx,
@@ -1409,11 +1416,17 @@ EXPORT_MODEL = ToolDefinition(
 
 def _handle_execute_code(code: str) -> ToolResult:
     """Execute arbitrary Python code (fallback tool)."""
+    from ..core.active_document import resolve_active_document
     from ..core.executor import execute_code
+
     result = execute_code(code)
     if result.success:
         output = result.stdout.strip() if result.stdout.strip() else "Code executed successfully"
-        return ToolResult(success=True, output=output, data={"stdout": result.stdout})
+        doc = resolve_active_document()
+        data = {"stdout": result.stdout}
+        if doc:
+            data["document"] = doc.Name
+        return ToolResult(success=True, output=output, data=data)
     else:
         return ToolResult(success=False, output=result.stdout, error=result.stderr)
 

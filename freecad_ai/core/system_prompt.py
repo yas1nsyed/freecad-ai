@@ -308,6 +308,8 @@ doc.recompute()
 - Over-constraining a sketch causes errors — check `sketch.FullyConstrained` after adding constraints
 - Don't add redundant constraints (e.g. Horizontal + angle=0 on the same line)
 - Close sketch profiles properly — unclosed sketches cannot be padded/pocketed
+- **`import Part` is mandatory** for `Part.LineSegment` / `Part.Circle` in sketch code; missing import fails silently if the LLM wraps code in a broad try/except
+- After programmatic `addGeometry`, always **`doc.recompute()`** or geometry won't show in the tree/view
 
 **General:**
 - Use the simplest primitive available rather than constructing shapes from sketches
