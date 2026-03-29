@@ -14,6 +14,7 @@ import io
 import json
 import os
 import re
+import shutil
 import signal
 import subprocess
 import sys
@@ -45,7 +46,6 @@ def _find_freecad_cmd() -> str:
     Handles AppImages, wrapper scripts, and standard installs.
     """
     import glob
-    import shutil
 
     # 1. Look for AppImages in ~/bin (preferred — direct binary, not a wrapper script)
     appimage_patterns = [
@@ -76,25 +76,7 @@ def _find_freecad_cmd() -> str:
     return ""
 
 
-def _code_requires_live_document(code: str) -> bool:
-    """Return True if code cannot be meaningfully tested in the sandbox harness.
-
-    The subprocess sandbox always runs inside a fresh empty document named
-    ``SandboxTest``. Code that references objects in the user's file via
-    ``getObject`` / ``getDocument`` would fail there or (if errors are swallowed)
-    appear to succeed without doing anything in the real session.
-    """
-    if not (code and code.strip()):
-        return False
-    markers = (
-        "getObject(",
-        "getDocument(",
-        "getObjectsByLabel(",
-    )
-    return any(m in code for m in markers)
-
-
-def _sandbox_test(code: str, timeout: int = 15) -> tuple:
+def _sandbox_test(code: str, timeout: int = 15, document_path: str | None = None) -> tuple:
     """Test code in a headless FreeCAD subprocess.
 
     Returns (safe: bool, error_message: str).
@@ -107,12 +89,23 @@ def _sandbox_test(code: str, timeout: int = 15) -> tuple:
     result_file = tempfile.mktemp(suffix=".json")
     script_file = tempfile.mktemp(suffix=".py")
 
-    # Write a test harness that runs the code in a fresh document
+    if document_path:
+        open_block = (
+            "    App.openDocument({path!r})\n"
+            "    doc = App.ActiveDocument\n"
+            "    if doc is None:\n"
+            "        raise RuntimeError('Sandbox: openDocument did not set ActiveDocument')\n"
+            "    App.setActiveDocument(doc.Name)"
+        ).format(path=document_path)
+    else:
+        open_block = '    doc = App.newDocument("SandboxTest")'
+
+    # Harness: run user code, then close all documents without saving (temp copy is disposable).
     harness = '''import sys, json, traceback
 result = {{"ok": False, "error": ""}}
 try:
     import FreeCAD as App
-    doc = App.newDocument("SandboxTest")
+{open_block}
     # --- user code ---
 {indented_code}
     # --- end user code ---
@@ -121,9 +114,16 @@ try:
 except Exception as e:
     result["error"] = traceback.format_exc()
 finally:
+    try:
+        import FreeCAD as App
+        for _dn in list(App.listDocuments().keys()):
+            App.closeDocument(_dn)
+    except Exception:
+        pass
     with open({result_path!r}, "w") as f:
         json.dump(result, f)
 '''.format(
+        open_block=open_block,
         indented_code="\n".join("    " + line for line in code.splitlines()),
         result_path=result_file,
     )
@@ -214,18 +214,42 @@ def execute_code(code: str, timeout: int = 30, sandbox: bool = True) -> Executio
             code=code,
         )
 
-    # Layer 2: Subprocess sandbox (skipped when code needs the open document)
-    if sandbox and not _code_requires_live_document(code):
-        safe, sandbox_err = _sandbox_test(code, timeout=min(timeout, 15))
-        if not safe:
-            return ExecutionResult(
-                success=False,
-                stdout="",
-                stderr=sandbox_err,
-                code=code,
-            )
-
     from .active_document import get_synced_active_document, refresh_gui_for_document
+
+    # Layer 2: Subprocess sandbox — optional copy of saved document so getObject-style code validates safely
+    sandbox_copy_path = None
+    if sandbox:
+        pre_doc = get_synced_active_document()
+        fn = getattr(pre_doc, "FileName", "") if pre_doc else ""
+        if fn and os.path.isfile(fn):
+            try:
+                fd, sandbox_copy_path = tempfile.mkstemp(suffix=".FCStd")
+                os.close(fd)
+                shutil.copy2(fn, sandbox_copy_path)
+            except OSError as e:
+                return ExecutionResult(
+                    success=False,
+                    stdout="",
+                    stderr=f"Sandbox: could not copy document for validation: {e}",
+                    code=code,
+                )
+        try:
+            safe, sandbox_err = _sandbox_test(
+                code, timeout=min(timeout, 15), document_path=sandbox_copy_path
+            )
+            if not safe:
+                return ExecutionResult(
+                    success=False,
+                    stdout="",
+                    stderr=sandbox_err,
+                    code=code,
+                )
+        finally:
+            if sandbox_copy_path:
+                try:
+                    os.unlink(sandbox_copy_path)
+                except OSError:
+                    pass
 
     target_doc = get_synced_active_document()
     if target_doc is None:

@@ -1,5 +1,8 @@
 """Tests for the select_geometry tool definition and handler."""
 
+import sys
+import types
+
 import pytest
 from unittest.mock import patch, MagicMock
 
@@ -69,15 +72,18 @@ class TestSelectGeometryInRegistry:
 
 
 class TestSelectGeometryHandler:
-    @patch("freecad_ai.tools.freecad_tools.SelectionPanel", create=True)
-    def test_cancelled_returns_empty(self, _mock_cls):
+    def _patch_selection_panel(self, mock_panel):
+        """Stub the UI module so tests run without Qt / real SelectionPanel."""
+        fake_mod = types.ModuleType("freecad_ai.ui.selection_panel")
+        fake_mod.SelectionPanel = MagicMock(return_value=mock_panel)
+        return patch.dict(sys.modules, {"freecad_ai.ui.selection_panel": fake_mod})
+
+    def test_cancelled_returns_empty(self):
         """Handler returns graceful message when user cancels."""
         mock_panel = MagicMock()
         mock_panel.exec.return_value = []
 
-        with patch(
-            "freecad_ai.ui.selection_panel.SelectionPanel", return_value=mock_panel
-        ):
+        with self._patch_selection_panel(mock_panel):
             from freecad_ai.tools.freecad_tools import _handle_select_geometry
             result = _handle_select_geometry(prompt="Pick edges")
 
@@ -85,8 +91,7 @@ class TestSelectGeometryHandler:
         assert result.data["selections"] == []
         assert "cancelled" in result.output.lower() or "nothing" in result.output.lower()
 
-    @patch("freecad_ai.tools.freecad_tools.SelectionPanel", create=True)
-    def test_with_selections(self, _mock_cls):
+    def test_with_selections(self):
         """Handler formats selections correctly."""
         sample = [
             {"object": "Pad", "sub_element": "Edge1", "point": [10.0, 0.0, 5.0]},
@@ -95,9 +100,7 @@ class TestSelectGeometryHandler:
         mock_panel = MagicMock()
         mock_panel.exec.return_value = sample
 
-        with patch(
-            "freecad_ai.ui.selection_panel.SelectionPanel", return_value=mock_panel
-        ):
+        with self._patch_selection_panel(mock_panel):
             from freecad_ai.tools.freecad_tools import _handle_select_geometry
             result = _handle_select_geometry(
                 prompt="Select edges to fillet", select_type="edge"
