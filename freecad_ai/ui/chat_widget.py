@@ -34,7 +34,13 @@ QTextCursor = QtGui.QTextCursor
 from ..config import get_config, save_current_config
 from ..core.conversation import Conversation
 from ..core.executor import extract_code_blocks, execute_code
-from .message_view import render_message, render_code_block, render_execution_result, render_tool_call
+from .message_view import (
+    get_chat_display_stylesheet,
+    render_message,
+    render_code_block,
+    render_execution_result,
+    render_tool_call,
+)
 from .code_review_dialog import CodeReviewDialog
 
 
@@ -587,9 +593,7 @@ class ChatDockWidget(QDockWidget):
         self.chat_display.setOpenExternalLinks(False)
         self.chat_display.setOpenLinks(False)
         self.chat_display.setFont(QFont("Sans", 10))
-        self.chat_display.setStyleSheet(
-            "QTextBrowser { border: 1px solid #ccc; background-color: #ffffff; }"
-        )
+        self.chat_display.setStyleSheet(get_chat_display_stylesheet())
         self.chat_display.anchorClicked.connect(self._handle_anchor_click)
         layout.addWidget(self.chat_display, 1)
 
