@@ -5,6 +5,7 @@ buttons. After execution, shows the result inline.
 """
 
 from .compat import QtWidgets, QtCore, QtGui
+from .message_view import _get_theme_colors, refresh_theme_cache
 from ..i18n import translate
 
 QDialog = QtWidgets.QDialog
@@ -29,6 +30,7 @@ class CodeReviewDialog(QDialog):
 
         self.setWindowTitle(translate("CodeReviewDialog", "Review Code"))
         self.setMinimumSize(600, 450)
+        refresh_theme_cache()
         self._build_ui()
 
     def _build_ui(self):
@@ -46,9 +48,10 @@ class CodeReviewDialog(QDialog):
         self.code_edit.setFont(font)
         self.code_edit.setPlainText(self.code)
         self.code_edit.setReadOnly(True)
+        colors = _get_theme_colors()
         self.code_edit.setStyleSheet(
-            "QTextEdit { background-color: #1e1e1e; color: #d4d4d4; "
-            "border: 1px solid #555; padding: 8px; }"
+            f"QTextEdit {{ background-color: {colors['code_bg']}; color: {colors['code_text']}; "
+            f"border: 1px solid {colors['code_border']}; padding: 8px; }}"
         )
         layout.addWidget(self.code_edit)
 
@@ -74,10 +77,11 @@ class CodeReviewDialog(QDialog):
 
         btn_layout.addStretch()
 
+        colors = _get_theme_colors()
         self.execute_btn = QPushButton(translate("CodeReviewDialog", "Execute"))
         self.execute_btn.setStyleSheet(
-            "QPushButton { background-color: #2e7d32; color: white; "
-            "padding: 6px 20px; font-weight: bold; }"
+            f"QPushButton {{ background-color: {colors['tool_success_border']}; color: white; "
+            f"padding: 6px 20px; font-weight: bold; }}"
         )
         self.execute_btn.clicked.connect(self._execute)
         btn_layout.addWidget(self.execute_btn)
@@ -92,17 +96,18 @@ class CodeReviewDialog(QDialog):
         """Toggle code editor between read-only and editable."""
         self._editable = not self._editable
         self.code_edit.setReadOnly(not self._editable)
+        colors = _get_theme_colors()
         if self._editable:
             self.edit_btn.setText(translate("CodeReviewDialog", "Lock"))
             self.code_edit.setStyleSheet(
-                "QTextEdit { background-color: #2d2d2d; color: #d4d4d4; "
-                "border: 1px solid #3daee9; padding: 8px; }"
+                f"QTextEdit {{ background-color: {colors['code_bg']}; color: {colors['code_text']}; "
+                f"border: 1px solid {colors['tool_success_border']}; padding: 8px; }}"
             )
         else:
             self.edit_btn.setText(translate("CodeReviewDialog", "Edit"))
             self.code_edit.setStyleSheet(
-                "QTextEdit { background-color: #1e1e1e; color: #d4d4d4; "
-                "border: 1px solid #555; padding: 8px; }"
+                f"QTextEdit {{ background-color: {colors['code_bg']}; color: {colors['code_text']}; "
+                f"border: 1px solid {colors['code_border']}; padding: 8px; }}"
             )
 
     def _execute(self):
@@ -111,12 +116,13 @@ class CodeReviewDialog(QDialog):
         self.execution_result = execute_code(self.code)
 
         self.result_label.setVisible(True)
+        colors = _get_theme_colors()
         if self.execution_result.success:
             self.result_label.setText(translate("CodeReviewDialog", "Code executed successfully."))
-            self.result_label.setStyleSheet("color: #2e7d32; font-weight: bold;")
+            self.result_label.setStyleSheet(f"color: {colors['tool_success_text']}; font-weight: bold;")
         else:
             self.result_label.setText(translate("CodeReviewDialog", "Execution failed:"))
-            self.result_label.setStyleSheet("color: #c62828; font-weight: bold;")
+            self.result_label.setStyleSheet(f"color: {colors['tool_error_text']}; font-weight: bold;")
 
         output = ""
         if self.execution_result.stdout.strip():

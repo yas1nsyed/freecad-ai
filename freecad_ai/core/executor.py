@@ -101,10 +101,20 @@ def _sandbox_test(code: str, timeout: int = 15, document_path: str | None = None
         open_block = '    doc = App.newDocument("SandboxTest")'
 
     # Harness: run user code, then close all documents without saving (temp copy is disposable).
+    # Stub FreeCADGui view methods that only work in a graphical session.
     harness = '''import sys, json, traceback
 result = {{"ok": False, "error": ""}}
 try:
     import FreeCAD as App
+    try:
+        import FreeCADGui as Gui
+        # Console mode: Gui module exists but has no active view.
+        # Stub methods that LLM code commonly calls so they become no-ops.
+        if not hasattr(Gui, "ActiveDocument") or Gui.ActiveDocument is None:
+            Gui.SendMsgToActiveView = lambda *a, **kw: None
+            Gui.updateGui = lambda *a, **kw: None
+    except ImportError:
+        pass
 {open_block}
     # --- user code ---
 {indented_code}
