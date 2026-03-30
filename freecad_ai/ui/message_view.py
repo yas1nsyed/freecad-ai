@@ -24,6 +24,163 @@ BOLD_RE = re.compile(r"\*\*(.+?)\*\*")
 # Match *italic*
 ITALIC_RE = re.compile(r"\*(.+?)\*")
 
+_CACHED_THEME_NAME = None
+_CACHED_THEME_COLORS = None
+
+_LIGHT_THEME_COLORS = {
+    "chat_bg": "#ffffff",
+    "chat_text": "#000000",
+    "chat_border": "#ababab",
+    "user_bg": "#e3f2fd",
+    "user_label": "#1565c0",
+    "assistant_bg": "#dcffdc",
+    "assistant_label": "#2e7d32",
+    "system_bg": "#ffffff5e",
+    "system_label": "#e65100",
+    "code_bg": "#f5f7fa",
+    "code_border": "#d6dde8",
+    "code_lang_bg": "#e9eef5",
+    "code_lang": "#475569",
+    "code_text": "#666565",
+    "result_bg": "#fafafa",
+    "stdout_bg": "#f0f0f0",
+    "stdout_text": "#333333",
+    "stderr_bg": "#fce4ec",
+    "stderr_text": "#b71c1c",
+    "tool_success_bg": "#e8f5e9",
+    "tool_success_border": "#4caf50",
+    "tool_success_text": "#2e7d32",
+    "tool_error_bg": "#fce4ec",
+    "tool_error_border": "#ef5350",
+    "tool_error_text": "#c62828",
+    "tool_output_bg": "rgba(0,0,0,0.05)",
+    "thinking_bg": "#f0f0f0",
+    "thinking_border": "#cccccc",
+    "thinking_text": "#999999",
+    "thinking_label": "#aaaaaa",
+    "inline_code_bg": "#e0e0e0",
+    "inline_code_text": "#111111",
+}
+
+_DARK_THEME_COLORS = {
+    "chat_bg": "#252525",
+    "chat_text": "#ffffff",
+    "chat_border": "#020202",
+    "user_bg": "#163142",
+    "user_label": "#8cc8ff",
+    "assistant_bg": "#243229",
+    "assistant_label": "#22CA00",
+    "system_bg": "#3d2f1f",
+    "system_label": "#ffffff65",
+    "code_bg": "#141414",
+    "code_border": "#2a2a2a",
+    "code_lang_bg": "#525252",
+    "code_lang": "#ffffff",
+    "code_text": "#aaaaaa",
+    "result_bg": "#242424",
+    "stdout_bg": "#1f1f1f",
+    "stdout_text": "#dddddd",
+    "stderr_bg": "#3a2028",
+    "stderr_text": "#ff9aa2",
+    "tool_success_bg": "#1f3323",
+    "tool_success_border": "#4caf50",
+    "tool_success_text": "#9de7a7",
+    "tool_error_bg": "#3a2028",
+    "tool_error_border": "#ef5350",
+    "tool_error_text": "#ff9aa2",
+    "tool_output_bg": "rgba(255,255,255,0.08)",
+    "thinking_bg": "#242424",
+    "thinking_border": "#555555",
+    "thinking_text": "#b0b0b0",
+    "thinking_label": "#c0c0c0",
+    "inline_code_bg": "#3a3a3a",
+    "inline_code_text": "#f2f2f2",
+}
+
+
+def _read_freecad_mode_name() -> str:
+    """Read FreeCAD's current UI mode/theme name from preferences.
+
+    Typical values (from PreferencePacks) are:
+      - "FreeCAD Dark"
+      - "FreeCAD Light"
+      - "FreeCAD Classic"
+
+    Returns:
+        The theme name string, or a sensible fallback like "Custom/Unknown".
+    """
+    try:
+        import FreeCAD as App
+
+        hgrp = App.ParamGet("User parameter:BaseApp/Preferences/MainWindow")
+        theme = hgrp.GetString("Theme", "").strip()
+
+        if theme:
+            return theme
+
+        return "Custom/Unknown"
+    except Exception:
+        return "Custom/Unknown"
+
+
+def get_freecad_mode_name(force_refresh: bool = False) -> str:
+    """Return cached FreeCAD mode name.
+    Args:
+        force_refresh: Re-read FreeCAD preferences instead of using cached value.
+    """
+    global _CACHED_THEME_NAME
+
+    if force_refresh or _CACHED_THEME_NAME is None:
+        _CACHED_THEME_NAME = _read_freecad_mode_name()
+    return _CACHED_THEME_NAME
+
+
+def _is_dark_mode(theme_name: str) -> bool:
+    """Return True when FreeCAD theme name indicates dark mode."""
+    return "dark" in (theme_name or "").strip().lower()
+
+
+def _colors_for_theme(theme_name: str) -> dict:
+    """Return color palette matching a theme name."""
+    if _is_dark_mode(theme_name):
+        return _DARK_THEME_COLORS
+    # Unknown/custom theme names intentionally fall back to light for readability.
+    return _LIGHT_THEME_COLORS
+
+
+def refresh_theme_cache() -> str:
+    """Force refresh theme name and colors, then return the current theme name."""
+    global _CACHED_THEME_NAME
+    global _CACHED_THEME_COLORS
+
+    _CACHED_THEME_NAME = _read_freecad_mode_name()
+    _CACHED_THEME_COLORS = _colors_for_theme(_CACHED_THEME_NAME)
+    return _CACHED_THEME_NAME
+
+
+def _get_theme_colors(force_refresh: bool = False) -> dict:
+    """Return cached colors selected by FreeCAD mode."""
+    global _CACHED_THEME_COLORS
+
+    if force_refresh:
+        refresh_theme_cache()
+    elif _CACHED_THEME_COLORS is None:
+        _CACHED_THEME_COLORS = _colors_for_theme(get_freecad_mode_name())
+
+    return _CACHED_THEME_COLORS
+
+
+def get_chat_display_stylesheet() -> str:
+    """Return QTextBrowser stylesheet based on current FreeCAD mode."""
+    colors = _get_theme_colors()
+    return (
+        "QTextBrowser { "
+        f"border: 1px solid {colors['chat_border']}; "
+        f"background-color: {colors['chat_bg']}; "
+        f"color: {colors['chat_text']}; "
+        "}"
+    )
+
 
 def render_message(role: str, content) -> str:
     """Render a single chat message as an HTML block.
@@ -35,18 +192,20 @@ def render_message(role: str, content) -> str:
     Returns:
         HTML string for insertion into QTextBrowser
     """
+    colors = _get_theme_colors()
+
     if role == "user":
         label = translate("MessageView", "You")
-        bg_color = "#e3f2fd"
-        label_color = "#1565c0"
+        bg_color = colors["user_bg"]
+        label_color = colors["user_label"]
     elif role == "assistant":
         label = translate("MessageView", "AI")
-        bg_color = "#f5f5f5"
-        label_color = "#2e7d32"
+        bg_color = colors["assistant_bg"]
+        label_color = colors["assistant_label"]
     else:
         label = translate("MessageView", "System")
-        bg_color = "#fff3e0"
-        label_color = "#e65100"
+        bg_color = colors["system_bg"]
+        label_color = colors["system_label"]
 
     if isinstance(content, list):
         formatted_content = _format_content_blocks(content)
@@ -65,12 +224,14 @@ def render_message(role: str, content) -> str:
 
 def render_code_block(code: str, language: str = "python") -> str:
     """Render a code block as a standalone HTML element with a copy-friendly format."""
+    colors = _get_theme_colors()
     escaped = html.escape(code.strip())
     return (
-        f'<div style="margin: 6px 0; background-color: #1e1e1e; '
-        f'border-radius: 4px; padding: 2px 0;">'
-        f'<div style="padding: 2px 8px; font-size: 11px; color: #888;">{language}</div>'
-        f'<pre style="margin: 0; padding: 8px; color: #d4d4d4; '
+        f'<div style="margin: 6px 0; background-color: {colors["code_bg"]}; '
+        f'border: 1px solid {colors["code_border"]}; border-radius: 4px; padding: 2px 0;">'
+        f'<div style="padding: 2px 8px; font-size: 11px; color: {colors["code_lang"]}; '
+        f'background-color: {colors["code_lang_bg"]};">{language}</div>'
+        f'<pre style="margin: 0; padding: 8px; color: {colors["code_text"]}; '
         f'font-family: monospace; font-size: 13px; overflow-x: auto;">'
         f'{escaped}</pre></div>'
     )
@@ -78,18 +239,20 @@ def render_code_block(code: str, language: str = "python") -> str:
 
 def render_execution_result(success: bool, stdout: str, stderr: str) -> str:
     """Render code execution results."""
+    colors = _get_theme_colors()
+
     if success:
         icon = "&#10003;"  # checkmark
-        color = "#2e7d32"
+        color = colors["tool_success_text"]
         status = translate("MessageView", "Code executed successfully")
     else:
         icon = "&#10007;"  # X
-        color = "#c62828"
+        color = colors["tool_error_text"]
         status = translate("MessageView", "Execution failed")
 
     parts = [
         f'<div style="margin: 6px 0; padding: 8px 12px; '
-        f'border-left: 3px solid {color}; background-color: #fafafa; '
+        f'border-left: 3px solid {color}; background-color: {colors["result_bg"]}; '
         f'border-radius: 0 4px 4px 0;">'
         f'<span style="color: {color}; font-weight: bold;">'
         f'{icon} {status}</span>'
@@ -99,16 +262,16 @@ def render_execution_result(success: bool, stdout: str, stderr: str) -> str:
         escaped_out = html.escape(stdout.strip())
         parts.append(
             f'<pre style="margin: 4px 0 0 0; padding: 4px 8px; '
-            f'background-color: #f0f0f0; font-size: 12px; '
-            f'font-family: monospace; color: #333;">{escaped_out}</pre>'
+            f'background-color: {colors["stdout_bg"]}; font-size: 12px; '
+            f'font-family: monospace; color: {colors["stdout_text"]};">{escaped_out}</pre>'
         )
 
     if stderr.strip():
         escaped_err = html.escape(stderr.strip())
         parts.append(
             f'<pre style="margin: 4px 0 0 0; padding: 4px 8px; '
-            f'background-color: #fce4ec; font-size: 12px; '
-            f'font-family: monospace; color: #b71c1c;">{escaped_err}</pre>'
+            f'background-color: {colors["stderr_bg"]}; font-size: 12px; '
+            f'font-family: monospace; color: {colors["stderr_text"]};">{escaped_err}</pre>'
         )
 
     parts.append('</div>')
@@ -126,27 +289,30 @@ def render_tool_call(tool_name: str, call_id: str, started: bool = True,
         success: Whether the tool call succeeded (only used when started=False)
         output: Tool result output (only used when started=False)
     """
+    colors = _get_theme_colors()
+
     if started:
         calling_text = translate("MessageView", "Calling {}...").format(
             '<b>{}</b>'.format(html.escape(tool_name)))
         return (
-            '<div style="margin: 4px 0; padding: 6px 10px; '
-            'background-color: #e8f5e9; border-left: 3px solid #4caf50; '
-            'border-radius: 0 4px 4px 0; font-size: 12px;">'
-            '<span style="color: #2e7d32;">&#9881; {}</span>'
+            f'<div style="margin: 4px 0; padding: 6px 10px; '
+            f'background-color: {colors["tool_success_bg"]}; '
+            f'border-left: 3px solid {colors["tool_success_border"]}; '
+            f'border-radius: 0 4px 4px 0; font-size: 12px;">'
+            f'<span style="color: {colors["tool_success_text"]};">&#9881; {{}}</span>'
             '</div>'.format(calling_text)
         )
     else:
         if success:
             icon = "&#10003;"
-            color = "#2e7d32"
-            bg = "#e8f5e9"
-            border_color = "#4caf50"
+            color = colors["tool_success_text"]
+            bg = colors["tool_success_bg"]
+            border_color = colors["tool_success_border"]
         else:
             icon = "&#10007;"
-            color = "#c62828"
-            bg = "#fce4ec"
-            border_color = "#ef5350"
+            color = colors["tool_error_text"]
+            bg = colors["tool_error_bg"]
+            border_color = colors["tool_error_border"]
 
         parts = [
             f'<div style="margin: 4px 0; padding: 6px 10px; '
@@ -162,8 +328,8 @@ def render_tool_call(tool_name: str, call_id: str, started: bool = True,
                 escaped_output = escaped_output[:500] + "..."
             parts.append(
                 f'<pre style="margin: 4px 0 0 0; padding: 4px 8px; '
-                f'background-color: rgba(0,0,0,0.05); font-size: 11px; '
-                f'font-family: monospace; color: #333;">{escaped_output}</pre>'
+                f'background-color: {colors["tool_output_bg"]}; font-size: 11px; '
+                f'font-family: monospace; color: {colors["stdout_text"]};">{escaped_output}</pre>'
             )
 
         parts.append('</div>')
@@ -172,15 +338,18 @@ def render_tool_call(tool_name: str, call_id: str, started: bool = True,
 
 def _render_thinking_block(thinking_text: str) -> str:
     """Render a <think> block as a dimmed, collapsible-style block."""
+    colors = _get_theme_colors()
+
     escaped = html.escape(thinking_text.strip())
     # Truncate very long thinking
     if len(escaped) > 2000:
         escaped = escaped[:2000] + "..."
     return (
-        '<div style="margin: 4px 0; padding: 4px 8px; '
-        'background-color: #f0f0f0; border-left: 2px solid #ccc; '
-        'font-size: 11px; color: #999; font-style: italic;">'
-        '<span style="color: #aaa;">{label}</span><br>'
+        f'<div style="margin: 4px 0; padding: 4px 8px; '
+        f'background-color: {colors["thinking_bg"]}; '
+        f'border-left: 2px solid {colors["thinking_border"]}; '
+        f'font-size: 11px; color: {colors["thinking_text"]}; font-style: italic;">'
+        f'<span style="color: {colors["thinking_label"]};">{{label}}</span><br>'
         '{text}</div>'.format(
             label=translate("MessageView", "Thinking"),
             text=escaped)
@@ -248,10 +417,15 @@ def _format_content(text: str) -> str:
 
 def _format_inline(text: str) -> str:
     """Apply inline formatting (bold, italic, inline code) to already-escaped HTML text."""
+    colors = _get_theme_colors()
+
     # Inline code
     text = INLINE_CODE_RE.sub(
-        r'<code style="background-color: #e0e0e0; padding: 1px 4px; '
-        r'border-radius: 3px; font-family: monospace;">\1</code>',
+        '<code style="background-color: {bg}; color: {fg}; padding: 1px 4px; '
+        'border-radius: 3px; font-family: monospace;">\\1</code>'.format(
+            bg=colors["inline_code_bg"],
+            fg=colors["inline_code_text"],
+        ),
         text
     )
     # Bold
