@@ -22,7 +22,7 @@ An AI-powered assistant workbench for FreeCAD that generates and executes Python
 - **Context-aware** — automatically includes document state (objects, properties, selection) in prompts
 - **Error self-correction** — failed code is sent back to the LLM for automatic retry (up to 3 attempts)
 - **AGENTS.md support** — project-level instructions with include directives and variable substitution
-- **Dark mode** — chat widget automatically adapts to FreeCAD's light/dark theme
+- **Dark mode** — chat widget automatically adapts to FreeCAD's light/dark theme (theme changes require FreeCAD restart)
 - **Zero external dependencies** — uses only Python stdlib (`urllib`, `json`, `threading`, `ssl`)
 
 ## Requirements
