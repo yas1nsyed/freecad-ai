@@ -8,7 +8,7 @@ An AI-powered assistant workbench for FreeCAD that generates and executes Python
 
 - **Chat interface** — dock widget with streaming LLM responses
 - **Plan / Act modes** — review code before execution (Plan) or auto-execute (Act)
-- **Tool calling** — 37 structured FreeCAD operations (Act mode) for safer, more reliable modeling
+- **Tool calling** — 39 structured FreeCAD operations (Act mode) for safer, more reliable modeling
 - **Skills** — reusable instruction sets the model invokes autonomously or via `/command` (enclosure, gear, fastener holes, etc.)
 - **Skill optimizer** — automatically improve skill instructions via iterative test-evaluate-modify loop (`/optimize-skill`)
 - **Hooks** — user-defined Python hooks for lifecycle events (block tools, modify input, log activity)
@@ -138,6 +138,8 @@ Tool calling is enabled by default. Disable it by setting `enable_tools: false` 
 | `create_enclosure_lid` | Generate a snap-fit enclosure lid with correct dimensions |
 | `measure` | Volume, area, bounding box, distance, edge listing |
 | `describe_model` | Comprehensive geometry summary: dimensions, wall thickness, hollow/solid detection |
+| `list_faces` | List all faces with names, labels (top, bottom, front, etc.), normals, and areas |
+| `list_edges` | List all edges with names, labels (top-front horizontal, etc.), and lengths |
 | `get_document_state` | Inspect current objects and properties |
 | `modify_property` | Change any object property |
 | `export_model` | Export to STL, STEP, or IGES |
@@ -282,7 +284,7 @@ freecad-ai/
 │   │   └── providers.py       # Provider registry
 │   ├── tools/
 │   │   ├── registry.py        # Tool abstractions + registry
-│   │   ├── freecad_tools.py   # 37 FreeCAD tool handlers
+│   │   ├── freecad_tools.py   # 39 FreeCAD tool handlers
 │   │   └── setup.py           # Default registry factory
 │   ├── ui/
 │   │   ├── compat.py          # PySide2/PySide6 shim
