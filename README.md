@@ -8,7 +8,7 @@ An AI-powered assistant workbench for FreeCAD that generates and executes Python
 
 - **Chat interface** — dock widget with streaming LLM responses
 - **Plan / Act modes** — review code before execution (Plan) or auto-execute (Act)
-- **Tool calling** — 37 structured FreeCAD operations (Act mode) for safer, more reliable modeling
+- **Tool calling** — 39 structured FreeCAD operations (Act mode) for safer, more reliable modeling
 - **Skills** — reusable instruction sets the model invokes autonomously or via `/command` (enclosure, gear, fastener holes, etc.)
 - **Skill optimizer** — automatically improve skill instructions via iterative test-evaluate-modify loop (`/optimize-skill`)
 - **Hooks** — user-defined Python hooks for lifecycle events (block tools, modify input, log activity)
@@ -22,6 +22,7 @@ An AI-powered assistant workbench for FreeCAD that generates and executes Python
 - **Context-aware** — automatically includes document state (objects, properties, selection) in prompts
 - **Error self-correction** — failed code is sent back to the LLM for automatic retry (up to 3 attempts)
 - **AGENTS.md support** — project-level instructions with include directives and variable substitution
+- **Dark mode** — chat widget automatically adapts to FreeCAD's light/dark theme (theme changes require FreeCAD restart)
 - **Zero external dependencies** — uses only Python stdlib (`urllib`, `json`, `threading`, `ssl`)
 
 ## Requirements
@@ -137,6 +138,8 @@ Tool calling is enabled by default. Disable it by setting `enable_tools: false` 
 | `create_enclosure_lid` | Generate a snap-fit enclosure lid with correct dimensions |
 | `measure` | Volume, area, bounding box, distance, edge listing |
 | `describe_model` | Comprehensive geometry summary: dimensions, wall thickness, hollow/solid detection |
+| `list_faces` | List all faces with names, labels (top, bottom, front, etc.), normals, and areas |
+| `list_edges` | List all edges with names, labels (top-front horizontal, etc.), and lengths |
 | `get_document_state` | Inspect current objects and properties |
 | `modify_property` | Change any object property |
 | `export_model` | Export to STL, STEP, or IGES |
@@ -281,7 +284,7 @@ freecad-ai/
 │   │   └── providers.py       # Provider registry
 │   ├── tools/
 │   │   ├── registry.py        # Tool abstractions + registry
-│   │   ├── freecad_tools.py   # 33 FreeCAD tool handlers
+│   │   ├── freecad_tools.py   # 39 FreeCAD tool handlers
 │   │   └── setup.py           # Default registry factory
 │   ├── ui/
 │   │   ├── compat.py          # PySide2/PySide6 shim
@@ -290,10 +293,14 @@ freecad-ai/
 │   │   ├── code_review_dialog.py
 │   │   └── settings_dialog.py
 │   ├── core/
+│   │   ├── active_document.py # GUI-aligned active document resolution
 │   │   ├── executor.py        # Code execution with safety layers
 │   │   ├── context.py         # Document state inspector
 │   │   ├── system_prompt.py   # System prompt builder
 │   │   └── conversation.py    # Conversation history + compacting + save/load
+│   ├── hooks/
+│   │   ├── __init__.py        # Hooks package
+│   │   └── registry.py        # Hook lifecycle event dispatch
 │   └── extensions/
 │       ├── agents_md.py       # AGENTS.md loader (multi-location, includes, vars)
 │       ├── skills.py          # Skills registry + execution
@@ -308,6 +315,8 @@ freecad-ai/
 │   ├── thread-insert/SKILL.md
 │   ├── lattice/SKILL.md
 │   └── skill-creator/SKILL.md
+├── hooks/                     # Built-in hook examples
+│   └── log-tool-calls/
 └── resources/
     └── icons/
         └── freecad_ai.svg

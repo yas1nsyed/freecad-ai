@@ -1277,6 +1277,268 @@ DESCRIBE_MODEL = ToolDefinition(
 )
 
 
+# ── list_faces ──────────────────────────────────────────────
+
+def _classify_face(face, bbox) -> str:
+    """Classify a face by its geometry and position relative to the object bounding box.
+
+    Returns a human-readable label like 'top', 'bottom', 'front', etc.
+    """
+    surface = face.Surface
+    surface_type = surface.__class__.__name__
+
+    # Planar faces — classify by normal direction and position
+    if surface_type == "Plane":
+        normal = face.normalAt(0, 0)
+        center = face.CenterOfMass
+        tol = 0.1  # tolerance for axis-aligned detection
+
+        # Determine which axis the normal is closest to
+        abs_x, abs_y, abs_z = abs(normal.x), abs(normal.y), abs(normal.z)
+
+        if abs_z > abs_x and abs_z > abs_y:
+            # Z-axis face
+            if normal.z > 0:
+                return "top" if abs(center.z - bbox.ZMax) < tol else "horizontal"
+            else:
+                return "bottom" if abs(center.z - bbox.ZMin) < tol else "horizontal"
+        elif abs_y > abs_x and abs_y > abs_z:
+            # Y-axis face
+            if normal.y > 0:
+                return "back" if abs(center.y - bbox.YMax) < tol else "side"
+            else:
+                return "front" if abs(center.y - bbox.YMin) < tol else "side"
+        elif abs_x > abs_y and abs_x > abs_z:
+            # X-axis face
+            if normal.x > 0:
+                return "right" if abs(center.x - bbox.XMax) < tol else "side"
+            else:
+                return "left" if abs(center.x - bbox.XMin) < tol else "side"
+        return "angled"
+
+    elif surface_type == "Cylinder":
+        radius = surface.Radius
+        return f"cylindrical (R={radius:.1f})"
+    elif surface_type == "Cone":
+        return "conical"
+    elif surface_type == "Sphere":
+        radius = surface.Radius
+        return f"spherical (R={radius:.1f})"
+    elif surface_type == "Toroid":
+        return "toroidal"
+    else:
+        return surface_type.lower()
+
+
+def _handle_list_faces(object_name: str) -> ToolResult:
+    """List all faces of an object with names, labels, normals, and positions."""
+    import FreeCAD as App
+
+    doc = App.ActiveDocument
+    if not doc:
+        return ToolResult(success=False, output="", error="No active document")
+
+    obj = _get_object(doc, object_name)
+    if not obj:
+        hint = _suggest_similar(doc, object_name)
+        return ToolResult(success=False, output="", error=f"Object '{object_name}' not found.{hint}")
+
+    shape = getattr(obj, "Shape", None)
+    if not shape:
+        return ToolResult(success=False, output="",
+                          error=f"Object '{object_name}' has no Shape")
+
+    if not shape.Faces:
+        return ToolResult(success=False, output="",
+                          error=f"Object '{object_name}' has no faces")
+
+    bbox = shape.BoundBox
+    lines = [f"## Faces of '{obj.Label}' ({len(shape.Faces)} faces)"]
+    face_data = []
+
+    for i, face in enumerate(shape.Faces):
+        name = f"Face{i + 1}"
+        center = face.CenterOfMass
+        area = face.Area
+        label = _classify_face(face, bbox)
+
+        surface_type = face.Surface.__class__.__name__
+
+        # Get normal for planar faces
+        normal_str = ""
+        if surface_type == "Plane":
+            n = face.normalAt(0, 0)
+            normal_str = f"  normal=({n.x:.2f}, {n.y:.2f}, {n.z:.2f})"
+
+        lines.append(
+            f"- **{name}** \"{label}\" — center=({center.x:.1f}, {center.y:.1f}, {center.z:.1f}), "
+            f"area={area:.1f}mm²{normal_str}"
+        )
+
+        face_data.append({
+            "name": name,
+            "label": label,
+            "type": surface_type.lower(),
+            "center": [round(center.x, 2), round(center.y, 2), round(center.z, 2)],
+            "area": round(area, 2),
+        })
+
+    output = "\n".join(lines)
+    return ToolResult(success=True, output=output, data={"faces": face_data})
+
+
+LIST_FACES = ToolDefinition(
+    name="list_faces",
+    description=(
+        "List all faces of an object with reference names (Face1, Face2, ...), "
+        "human-readable labels (top, bottom, front, back, left, right, cylindrical), "
+        "center positions, normals, and areas. Use this to identify which face to "
+        "reference in shell_object, assembly constraints, or other face-based operations."
+    ),
+    category="query",
+    parameters=[
+        ToolParam("object_name", "string", "Internal name or label of the object"),
+    ],
+    handler=_handle_list_faces,
+)
+
+
+# ── list_edges ──────────────────────────────────────────────
+
+def _classify_edge(edge, bbox) -> str:
+    """Classify an edge by its geometry, direction, and position relative to the bounding box.
+
+    Returns a human-readable label like 'top-front horizontal', 'front-left vertical', etc.
+    """
+    curve = edge.Curve
+    curve_type = curve.__class__.__name__
+
+    if curve_type not in ("Line", "LineSegment"):
+        # Curved edges — report type and radius if available
+        if curve_type in ("Circle", "ArcOfCircle"):
+            return f"circular (R={curve.Radius:.1f})"
+        elif curve_type == "BSplineCurve":
+            return "spline"
+        elif curve_type in ("Ellipse", "ArcOfEllipse"):
+            return "elliptical"
+        return curve_type.lower()
+
+    # Straight edge — classify by direction and position
+    mid = edge.CenterOfMass
+    tol = 0.1
+    length = edge.Length
+
+    # Determine direction from start/end vertices
+    p1 = edge.Vertexes[0].Point
+    p2 = edge.Vertexes[1].Point
+    dx = abs(p2.x - p1.x)
+    dy = abs(p2.y - p1.y)
+    dz = abs(p2.z - p1.z)
+    max_d = max(dx, dy, dz)
+
+    if max_d < tol:
+        return "point"
+
+    if dz / max_d > 0.9:
+        direction = "vertical"
+    elif dx / max_d > 0.9 and dy / max_d < 0.1:
+        direction = "horizontal-X"
+    elif dy / max_d > 0.9 and dx / max_d < 0.1:
+        direction = "horizontal-Y"
+    elif dz / max_d < 0.1:
+        direction = "horizontal"
+    else:
+        direction = "diagonal"
+
+    # Determine position labels from midpoint proximity to bounding box faces
+    parts = []
+
+    # Z position
+    if abs(mid.z - bbox.ZMax) < tol:
+        parts.append("top")
+    elif abs(mid.z - bbox.ZMin) < tol:
+        parts.append("bottom")
+
+    # Y position
+    if abs(mid.y - bbox.YMin) < tol:
+        parts.append("front")
+    elif abs(mid.y - bbox.YMax) < tol:
+        parts.append("back")
+
+    # X position
+    if abs(mid.x - bbox.XMin) < tol:
+        parts.append("left")
+    elif abs(mid.x - bbox.XMax) < tol:
+        parts.append("right")
+
+    position = "-".join(parts) if parts else "interior"
+    return f"{position} {direction}"
+
+
+def _handle_list_edges(object_name: str) -> ToolResult:
+    """List all edges of an object with names, labels, positions, and lengths."""
+    import FreeCAD as App
+
+    doc = App.ActiveDocument
+    if not doc:
+        return ToolResult(success=False, output="", error="No active document")
+
+    obj = _get_object(doc, object_name)
+    if not obj:
+        hint = _suggest_similar(doc, object_name)
+        return ToolResult(success=False, output="", error=f"Object '{object_name}' not found.{hint}")
+
+    shape = getattr(obj, "Shape", None)
+    if not shape:
+        return ToolResult(success=False, output="",
+                          error=f"Object '{object_name}' has no Shape")
+
+    if not shape.Edges:
+        return ToolResult(success=False, output="",
+                          error=f"Object '{object_name}' has no edges")
+
+    bbox = shape.BoundBox
+    lines = [f"## Edges of '{obj.Label}' ({len(shape.Edges)} edges)"]
+    edge_data = []
+
+    for i, edge in enumerate(shape.Edges):
+        name = f"Edge{i + 1}"
+        mid = edge.CenterOfMass
+        length = edge.Length
+        label = _classify_edge(edge, bbox)
+
+        lines.append(
+            f"- **{name}** \"{label}\" — midpoint=({mid.x:.1f}, {mid.y:.1f}, {mid.z:.1f}), "
+            f"length={length:.1f}mm"
+        )
+
+        edge_data.append({
+            "name": name,
+            "label": label,
+            "midpoint": [round(mid.x, 2), round(mid.y, 2), round(mid.z, 2)],
+            "length": round(length, 2),
+        })
+
+    output = "\n".join(lines)
+    return ToolResult(success=True, output=output, data={"edges": edge_data})
+
+
+LIST_EDGES = ToolDefinition(
+    name="list_edges",
+    description=(
+        "List all edges of an object with reference names (Edge1, Edge2, ...), "
+        "human-readable labels (top-front horizontal, front-left vertical, circular, etc.), "
+        "midpoint positions, and lengths. Use this to identify which edge to "
+        "reference in fillet_edges, chamfer_edges, or other edge-based operations."
+    ),
+    category="query",
+    parameters=[
+        ToolParam("object_name", "string", "Internal name or label of the object"),
+    ],
+    handler=_handle_list_edges,
+)
+
+
 # ── get_document_state ──────────────────────────────────────
 
 def _handle_get_document_state() -> ToolResult:
@@ -3186,6 +3448,8 @@ ALL_TOOLS = [
     MULTI_TRANSFORM,
     MEASURE,
     DESCRIBE_MODEL,
+    LIST_FACES,
+    LIST_EDGES,
     GET_DOCUMENT_STATE,
     MODIFY_PROPERTY,
     EXPORT_MODEL,

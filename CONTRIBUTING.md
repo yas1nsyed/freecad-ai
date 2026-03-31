@@ -42,6 +42,15 @@ Thank you for your interest in contributing! This guide explains how to set up a
    ```
 5. Open a **Pull Request** on GitHub against `master`
 
+### Pull Request Guidelines
+
+- **Use a feature branch** — don't PR from your fork's `master`. Name it descriptively (e.g., `feat/dark-mode`, `fix/gpt5-params`, `contrib/active-document`).
+- **Squash into clean commits** — one logical change per commit. Merge commits from your own fork add noise.
+- **Write a PR description** — include a Summary (what and why), list of changes, and how you tested.
+- **Keep scope focused** — one PR per feature or fix. Large PRs that touch many unrelated areas are harder to review.
+- **Expect review feedback** — maintainers may request changes before merging. This is normal and collaborative.
+- **Tests** — add unit tests for new code when possible. Run `pytest tests/unit/ -v` before submitting.
+
 ### Commit Message Convention
 
 We use short prefixes for commit messages:

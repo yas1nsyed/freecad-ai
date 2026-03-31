@@ -9,17 +9,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- **Dark mode** — chat widget automatically adapts to FreeCAD's light/dark theme. Color palette cached for performance with `refresh_theme_cache()` available for runtime switching. (PR #5, @yas1nsyed)
+- **GUI active document resolution** — tools and `execute_code` now prefer `FreeCADGui.ActiveDocument.Document` over `App.ActiveDocument`, fixing desync when multiple documents are open. New `active_document.py` module with `resolve_active_document()` / `get_synced_active_document()`. (PR #3, @dpappo)
+- **OpenAI GPT-5 support** — `max_completion_tokens` instead of `max_tokens`, temperature omitted (GPT-5 rejects non-default values). Handled via `_apply_provider_overrides()`. (PR #3, @dpappo)
+- **Sandbox document copy** — `execute_code` subprocess sandbox now opens a temp copy of the saved `.FCStd` file so `getObject()`-style code validates against real document state instead of an empty `SandboxTest` doc. (PR #3, @dpappo)
+
+## [0.6.0-alpha] - 2026-03-28
+
+New tools, Skills management, skill optimizer, hooks, and snap packaging fix.
+
+### Added
+
 - **Skill optimizer** — `/optimize-skill` command that iteratively improves SKILL.md files by running test cases, scoring results (completion, errors, geometric correctness, efficiency, visual similarity), and using the LLM to modify instructions. Includes PySide2 configuration dialog, version history with original backup, three optimization strategies (conservative, balanced, aggressive), and configurable network retry with exponential backoff. Inspired by [autoresearch](https://github.com/karpathy/autoresearch).
 - **Built-in skills auto-discovery** — SkillsRegistry now scans both the repo's `skills/` directory and the user's `~/.config/FreeCAD/FreeCADAI/skills/`. User skills override built-in skills with the same name. No more manual copying of built-in skills.
 - **Hooks system** — user-defined Python hooks that fire on lifecycle events (`pre_tool_use`, `post_tool_use`, `user_prompt_submit`, `post_response`). Hooks can block actions, modify input, or log activity. Directory-based discovery at `~/.config/FreeCAD/FreeCADAI/hooks/`. Includes built-in `log-tool-calls` hook and Settings UI for managing hooks.
 - **Configurable context window** — new "Context Window" setting controls when automatic conversation compaction triggers. Set to your model's context limit or lower to control API costs.
-
-## [0.6.0-alpha] - 2026-03-28
-
-New tools, Skills management, and snap packaging fix.
-
-### Added
-
 - **`describe_model` tool** — comprehensive geometry summary of an object in one call: bounding box, volume, face/edge counts, hollow/solid detection, estimated wall thickness, and PartDesign feature list.
 - **`redo` tool** — redo previously undone operations.
 - **`undo_history` tool** — show the undo/redo stack with named transactions, so the model can see what's available before deciding what to undo.
@@ -166,6 +170,9 @@ Initial alpha release.
 - **Dual licensing** — LGPL-2.1 (code) + CC0-1.0 (icons)
 - **Zero external dependencies** — uses only Python stdlib
 
+[0.6.0-alpha]: https://github.com/ghbalf/freecad-ai/releases/tag/v0.6.0-alpha
+[0.5.0-alpha]: https://github.com/ghbalf/freecad-ai/releases/tag/v0.5.0-alpha
+[0.4.0-alpha]: https://github.com/ghbalf/freecad-ai/releases/tag/v0.4.0-alpha
 [0.3.0-alpha]: https://github.com/ghbalf/freecad-ai/releases/tag/v0.3.0-alpha
 [0.2.0-alpha]: https://github.com/ghbalf/freecad-ai/releases/tag/v0.2.0-alpha
 [0.1.0]: https://github.com/ghbalf/freecad-ai/releases/tag/v0.1.0

@@ -64,6 +64,8 @@ that perform FreeCAD operations safely. Prefer using tools over generating raw c
 - For chaining multiple transformations (e.g. linear pattern + mirror) into one feature: use `multi_transform` — accepts multiple features to transform as a group (order matters: last feature = tip)
 - For hollowing out solids (shell): use `shell_object`
 - For measuring dimensions, distances, or volumes: use `measure`
+- For listing all faces with names and labels (top, bottom, front, etc.): use `list_faces` — helps choose the right face for `shell_object` or assembly constraints
+- For listing all edges with names and labels (top-front horizontal, front-left vertical, etc.): use `list_edges` — helps choose the right edge for `fillet_edges` or `chamfer_edges`
 - For inspecting the current document and its objects: use `get_document_state`
 - For changing object properties (length, width, label, visibility, etc.): use `modify_property`
 - For exporting to STEP, STL, or other formats: use `export_model`

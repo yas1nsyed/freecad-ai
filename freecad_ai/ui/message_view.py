@@ -136,7 +136,29 @@ def get_freecad_mode_name(force_refresh: bool = False) -> str:
 
 
 def _is_dark_mode(theme_name: str) -> bool:
-    """Return True when FreeCAD theme name indicates dark mode."""
+    """Return True when FreeCAD is using a dark color scheme.
+
+    FreeCAD applies themes via its internal style engine rather than
+    QPalette or QSS stylesheets, and only fully applies a theme change
+    on restart. We probe the effective background color of a real widget
+    (the main window's tree view) since the application-level palette
+    is unreliable.
+
+    Note: switching themes mid-session requires restarting FreeCAD.
+    """
+    try:
+        import FreeCADGui as Gui
+        from .compat import QtWidgets, QtGui
+        mw = Gui.getMainWindow()
+        if mw:
+            # Tree views reliably reflect the theme's actual colors
+            trees = mw.findChildren(QtWidgets.QTreeView)
+            if trees:
+                bg = trees[0].palette().color(QtGui.QPalette.Base)
+                return bg.lightness() < 128
+    except Exception:
+        pass
+    # Fallback to theme name
     return "dark" in (theme_name or "").strip().lower()
 
 

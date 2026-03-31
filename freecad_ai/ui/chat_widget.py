@@ -35,7 +35,9 @@ from ..config import get_config, save_current_config
 from ..core.conversation import Conversation
 from ..core.executor import extract_code_blocks, execute_code
 from .message_view import (
+    _get_theme_colors,
     get_chat_display_stylesheet,
+    refresh_theme_cache,
     render_message,
     render_code_block,
     render_execution_result,
@@ -469,13 +471,14 @@ class _AttachmentStrip(QtWidgets.QWidget):
         if not pixmap.isNull():
             pixmap = pixmap.scaled(48, 48, Qt.KeepAspectRatio, Qt.SmoothTransformation)
         label.setPixmap(pixmap)
-        label.setStyleSheet("border: 1px solid #ccc; border-radius: 3px;")
+        colors = _get_theme_colors()
+        label.setStyleSheet(f"border: 1px solid {colors['chat_border']}; border-radius: 3px;")
         container_layout.addWidget(label)
 
         # Remove button
         remove_btn = QPushButton("x")
         remove_btn.setMaximumSize(16, 16)
-        remove_btn.setStyleSheet("font-size: 10px; padding: 0; border: none; color: #c62828;")
+        remove_btn.setStyleSheet(f"font-size: 10px; padding: 0; border: none; color: {colors['tool_error_text']};")
         idx = len(self._items)
         remove_btn.clicked.connect(lambda checked=False, i=idx: self._remove(i))
         container_layout.addWidget(remove_btn, alignment=Qt.AlignCenter)
@@ -608,6 +611,11 @@ class ChatDockWidget(QDockWidget):
         self.input_edit.setPlaceholderText(translate("ChatDockWidget", "Describe what you want to create..."))
         self.input_edit.setMaximumHeight(80)
         self.input_edit.setFont(QFont("Sans", 10))
+        colors = _get_theme_colors()
+        self.input_edit.setStyleSheet(
+            f"QTextEdit {{ background-color: {colors['chat_bg']}; color: {colors['chat_text']}; "
+            f"border: 1px solid {colors['chat_border']}; }}"
+        )
         self.input_edit.installEventFilter(self)
         self.input_edit.image_added.connect(self._on_image_added)
         input_layout.addWidget(self.input_edit, 1)
@@ -625,8 +633,8 @@ class ChatDockWidget(QDockWidget):
         self.send_btn = QPushButton(translate("ChatDockWidget", "Send"))
         self.send_btn.setMinimumHeight(30)
         self.send_btn.setStyleSheet(
-            "QPushButton { background-color: #3daee9; color: white; "
-            "font-weight: bold; padding: 8px 16px; }"
+            f"QPushButton {{ background-color: {colors['tool_success_border']}; color: white; "
+            f"font-weight: bold; padding: 8px 16px; }}"
         )
         self.send_btn.clicked.connect(self._send_message)
         btn_layout.addWidget(self.send_btn)
@@ -658,12 +666,41 @@ class ChatDockWidget(QDockWidget):
         footer.addStretch()
 
         self.token_label = QLabel(translate("ChatDockWidget", "tokens: ~0"))
-        self.token_label.setStyleSheet("color: #888; font-size: 11px;")
+        self.token_label.setStyleSheet(f"color: {colors['thinking_text']}; font-size: 11px;")
         footer.addWidget(self.token_label)
 
         layout.addLayout(footer)
 
         self.setWidget(container)
+
+    # ── Theme refresh on show ──────────────────────────────
+
+    def showEvent(self, event):
+        """Refresh theme colors when the widget becomes visible."""
+        super().showEvent(event)
+        refresh_theme_cache()
+        self._apply_theme()
+
+    def _apply_theme(self):
+        """Reapply all theme-dependent stylesheets."""
+        colors = _get_theme_colors()
+        self.chat_display.setStyleSheet(get_chat_display_stylesheet())
+        self.input_edit.setStyleSheet(
+            f"QTextEdit {{ background-color: {colors['chat_bg']}; color: {colors['chat_text']}; "
+            f"border: 1px solid {colors['chat_border']}; }}"
+        )
+        if not self.send_btn.isEnabled():
+            # Loading state
+            self.send_btn.setStyleSheet(
+                f"QPushButton {{ background-color: {colors['system_label']}; color: white; "
+                f"font-weight: bold; padding: 8px 16px; }}"
+            )
+        else:
+            self.send_btn.setStyleSheet(
+                f"QPushButton {{ background-color: {colors['tool_success_border']}; color: white; "
+                f"font-weight: bold; padding: 8px 16px; }}"
+            )
+        self.token_label.setStyleSheet(f"color: {colors['thinking_text']}; font-size: 11px;")
 
     # ── Event filter (Enter to send) ────────────────────────
 
@@ -1829,19 +1866,20 @@ class ChatDockWidget(QDockWidget):
 
     def _set_loading(self, loading):
         """Enable/disable input while LLM is processing."""
+        colors = _get_theme_colors()
         self.send_btn.setEnabled(not loading)
         self.input_edit.setReadOnly(loading)
         if loading:
             self.send_btn.setText("...")
             self.send_btn.setStyleSheet(
-                "QPushButton { background-color: #f57c00; color: white; "
-                "font-weight: bold; padding: 8px 16px; }"
+                f"QPushButton {{ background-color: {colors['system_label']}; color: white; "
+                f"font-weight: bold; padding: 8px 16px; }}"
             )
         else:
             self.send_btn.setText(translate("ChatDockWidget", "Send"))
             self.send_btn.setStyleSheet(
-                "QPushButton { background-color: #3daee9; color: white; "
-                "font-weight: bold; padding: 8px 16px; }"
+                f"QPushButton {{ background-color: {colors['tool_success_border']}; color: white; "
+                f"font-weight: bold; padding: 8px 16px; }}"
             )
 
     def _update_token_count(self):
