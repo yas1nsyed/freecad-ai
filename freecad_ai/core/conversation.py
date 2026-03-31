@@ -166,6 +166,8 @@ class Conversation:
                         for tc in msg["tool_calls"]
                     ],
                 }
+                if msg.get("reasoning_content"):
+                    oai_msg["reasoning_content"] = msg["reasoning_content"]
                 result.append(oai_msg)
             elif isinstance(msg.get("content"), list):
                 # Content blocks (text + images)
@@ -181,7 +183,10 @@ class Conversation:
                         })
                 result.append({"role": msg["role"], "content": oai_blocks})
             else:
-                result.append({"role": msg["role"], "content": msg["content"]})
+                out = {"role": msg["role"], "content": msg["content"]}
+                if msg.get("reasoning_content"):
+                    out["reasoning_content"] = msg["reasoning_content"]
+                result.append(out)
         return result
 
     def _to_anthropic_format(self, messages: list[dict]) -> list[dict]:
