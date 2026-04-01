@@ -172,8 +172,8 @@ def _get_key_properties(obj) -> list[str]:
         except Exception:
             pass
         try:
-            if obj.Reversed == True:
-                props.append(f"Reversed: true")
+            if obj.Reversed:
+                props.append("Reversed: true")
         except Exception:
             pass
 
@@ -192,7 +192,7 @@ def _get_key_properties(obj) -> list[str]:
     # Revolution properties
     if "Revolution" in type_id:
         rev_type_name = ""
-        # Extract type of pad/pocket (Ex: Angle, Upto surface.. etc)
+        # Extract type of revolution (Ex: Angle, Upto surface.. etc)
         try:
             rev_type = obj.Type
             rev_type_name = str(rev_type)
@@ -213,10 +213,11 @@ def _get_key_properties(obj) -> list[str]:
         except Exception:
             pass
         try:
-            if obj.Reversed == True:
+            if obj.Reversed:
                 props.append("Reversed: true")
         except Exception:
             pass
+
 
     # Part primitives
     if "Part::Box" in type_id:
