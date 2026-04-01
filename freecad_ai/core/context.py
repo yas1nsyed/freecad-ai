@@ -154,10 +154,26 @@ def _get_key_properties(obj) -> list[str]:
         except Exception:
             pass
 
-    # Pad/Pocket length
+    # Pad/Pocket properties
     if "Pad" in type_id or "Pocket" in type_id:
+        # Extract type of pad/pocket (Ex: Dimension, Upto surface.. etc)
+        type_name = ""
+        try:
+            p_type = obj.Type
+            type_name = str(p_type)
+            if type_name:
+                props.append(f"Type: {type_name}")
+        except Exception:
+            pass
         try:
             props.append(f"Length: {obj.Length}")
+            if type_name == "TwoLengths" and hasattr(obj, "Length2"):
+                props.append(f"Length2: {obj.Length2}")
+        except Exception:
+            pass
+        try:
+            if obj.Reversed == True:
+                props.append(f"Reversed: true")
         except Exception:
             pass
 
@@ -173,10 +189,32 @@ def _get_key_properties(obj) -> list[str]:
         except Exception:
             pass
 
-    # Revolution angle
+    # Revolution properties
     if "Revolution" in type_id:
+        rev_type_name = ""
+        # Extract type of pad/pocket (Ex: Angle, Upto surface.. etc)
+        try:
+            rev_type = obj.Type
+            rev_type_name = str(rev_type)
+            if rev_type_name:
+                props.append(f"Type: {rev_type_name}")
+        except Exception:
+            pass
         try:
             props.append(f"Angle: {obj.Angle}")
+            if rev_type_name == "TwoAngles" and hasattr(obj, "Angle2"):
+                props.append(f"Angle2: {obj.Angle2}")
+        except Exception:
+            pass
+        # Reference axis of rotation
+        try:
+            if hasattr(obj, "ReferenceAxis"):
+                props.append(f"ReferenceAxis: {obj.ReferenceAxis}")
+        except Exception:
+            pass
+        try:
+            if obj.Reversed == True:
+                props.append("Reversed: true")
         except Exception:
             pass
 
