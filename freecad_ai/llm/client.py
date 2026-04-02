@@ -18,6 +18,7 @@ try:
 except ImportError:
     _HAS_SSL = False
 import subprocess
+import time
 import urllib.request
 import urllib.error
 from dataclasses import dataclass, field
@@ -655,62 +656,88 @@ class LLMClient:
 
     # ── HTTP helpers ────────────────────────────────────────────
 
-    def _http_post(self, url: str, headers: dict, body: dict) -> dict:
-        """Make an HTTP POST request and return parsed JSON response."""
-        payload = json.dumps(body).encode("utf-8")
-        req = urllib.request.Request(url, data=payload, headers=headers, method="POST")
-        # Ollama may need extra time to load large models from disk
-        timeout = 300 if self.provider_name == "ollama" else 120
+    _MAX_RETRIES = 5
+    _BASE_BACKOFF = 2  # seconds
 
-        try:
-            ctx = self._ssl_ctx if url.startswith("https") else None
-            if url.startswith("https") and not _HAS_SSL:
-                raise LLMError(
-                    "HTTPS is not available (Python _ssl module missing). "
-                    "This can happen with snap-packaged FreeCAD. "
-                    "Use Ollama (http://localhost:11434) or fix the snap's Python SSL support."
-                )
-            with urllib.request.urlopen(req, context=ctx, timeout=timeout) as resp:
-                return json.loads(resp.read().decode("utf-8"))
-        except urllib.error.HTTPError as e:
-            error_body = ""
+    def _check_ssl(self, url: str) -> None:
+        """Raise LLMError if HTTPS is requested but SSL is unavailable."""
+        if url.startswith("https") and not _HAS_SSL:
+            raise LLMError(
+                "HTTPS is not available (Python _ssl module missing). "
+                "This can happen with snap-packaged FreeCAD. "
+                "Use Ollama (http://localhost:11434) or fix the snap's Python SSL support."
+            )
+
+    def _get_retry_delay(self, error: urllib.error.HTTPError, attempt: int) -> float:
+        """Calculate retry delay from Retry-After header or exponential backoff."""
+        retry_after = error.headers.get("Retry-After") if error.headers else None
+        if retry_after:
             try:
-                error_body = e.read().decode("utf-8")
-            except Exception:
+                return max(float(retry_after), 1.0)
+            except ValueError:
                 pass
-            raise LLMError(f"HTTP {e.code}: {e.reason}\n{error_body}")
-        except urllib.error.URLError as e:
-            raise LLMError(f"Connection error: {e.reason}")
-        except Exception as e:
-            raise LLMError(f"Request failed: {e}")
+        return self._BASE_BACKOFF * (2 ** attempt) + random.uniform(0, 1)
+
+    def _http_post(self, url: str, headers: dict, body: dict) -> dict:
+        """Make an HTTP POST request with retry on 429. Returns parsed JSON."""
+        self._check_ssl(url)
+        payload = json.dumps(body).encode("utf-8")
+        timeout = 300 if self.provider_name == "ollama" else 120
+        ctx = self._ssl_ctx if url.startswith("https") else None
+
+        for attempt in range(self._MAX_RETRIES + 1):
+            req = urllib.request.Request(url, data=payload, headers=headers, method="POST")
+            try:
+                with urllib.request.urlopen(req, context=ctx, timeout=timeout) as resp:
+                    return json.loads(resp.read().decode("utf-8"))
+            except urllib.error.HTTPError as e:
+                if e.code == 429 and attempt < self._MAX_RETRIES:
+                    delay = self._get_retry_delay(e, attempt)
+                    logger.warning("Rate limited (429), retrying in %.1fs (attempt %d/%d)",
+                                   delay, attempt + 1, self._MAX_RETRIES)
+                    time.sleep(delay)
+                    continue
+                error_body = ""
+                try:
+                    error_body = e.read().decode("utf-8")
+                except Exception:
+                    pass
+                raise LLMError(f"HTTP {e.code}: {e.reason}\n{error_body}")
+            except urllib.error.URLError as e:
+                raise LLMError(f"Connection error: {e.reason}")
+            except Exception as e:
+                raise LLMError(f"Request failed: {e}")
 
     def _http_stream(self, url: str, headers: dict, body: dict) -> Generator[dict, None, None]:
-        """Make a streaming HTTP POST and yield parsed SSE data chunks."""
+        """Make a streaming HTTP POST with retry on 429. Yields parsed SSE data chunks."""
+        self._check_ssl(url)
         payload = json.dumps(body).encode("utf-8")
-        req = urllib.request.Request(url, data=payload, headers=headers, method="POST")
-        # Ollama may need extra time to load large models from disk
         timeout = 300 if self.provider_name == "ollama" else 120
+        ctx = self._ssl_ctx if url.startswith("https") else None
 
-        try:
-            ctx = self._ssl_ctx if url.startswith("https") else None
-            if url.startswith("https") and not _HAS_SSL:
-                raise LLMError(
-                    "HTTPS is not available (Python _ssl module missing). "
-                    "This can happen with snap-packaged FreeCAD. "
-                    "Use Ollama (http://localhost:11434) or fix the snap's Python SSL support."
-                )
-            resp = urllib.request.urlopen(req, context=ctx, timeout=timeout)
-        except urllib.error.HTTPError as e:
-            error_body = ""
+        resp = None
+        for attempt in range(self._MAX_RETRIES + 1):
+            req = urllib.request.Request(url, data=payload, headers=headers, method="POST")
             try:
-                error_body = e.read().decode("utf-8")
-            except Exception:
-                pass
-            raise LLMError(f"HTTP {e.code}: {e.reason}\n{error_body}")
-        except urllib.error.URLError as e:
-            raise LLMError(f"Connection error: {e.reason}")
-        except Exception as e:
-            raise LLMError(f"Request failed: {e}")
+                resp = urllib.request.urlopen(req, context=ctx, timeout=timeout)
+                break
+            except urllib.error.HTTPError as e:
+                if e.code == 429 and attempt < self._MAX_RETRIES:
+                    delay = self._get_retry_delay(e, attempt)
+                    logger.warning("Rate limited (429), retrying in %.1fs (attempt %d/%d)",
+                                   delay, attempt + 1, self._MAX_RETRIES)
+                    time.sleep(delay)
+                    continue
+                error_body = ""
+                try:
+                    error_body = e.read().decode("utf-8")
+                except Exception:
+                    pass
+                raise LLMError(f"HTTP {e.code}: {e.reason}\n{error_body}")
+            except urllib.error.URLError as e:
+                raise LLMError(f"Connection error: {e.reason}")
+            except Exception as e:
+                raise LLMError(f"Request failed: {e}")
 
         try:
             buffer = ""
