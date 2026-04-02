@@ -8,7 +8,7 @@ An AI-powered assistant workbench for FreeCAD that generates and executes Python
 
 - **Chat interface** — dock widget with streaming LLM responses
 - **Plan / Act modes** — review code before execution (Plan) or auto-execute (Act)
-- **Tool calling** — 39 structured FreeCAD operations (Act mode) for safer, more reliable modeling
+- **Tool calling** — 42 structured FreeCAD operations (Act mode) for safer, more reliable modeling
 - **Skills** — reusable instruction sets the model invokes autonomously or via `/command` (enclosure, gear, fastener holes, etc.)
 - **Skill optimizer** — automatically improve skill instructions via iterative test-evaluate-modify loop (`/optimize-skill`)
 - **Hooks** — user-defined Python hooks for lifecycle events (block tools, modify input, log activity)
@@ -151,6 +151,9 @@ Tool calling is enabled by default. Disable it by setting `enable_tools: false` 
 | `set_view` | Set camera orientation (front, top, isometric, etc.) |
 | `zoom_object` | Zoom the viewport to a specific object |
 | `use_skill` | Load a skill's instructions for complex tasks (enclosure, gear, etc.) |
+| `create_assembly` | Create an Assembly with grounded base part |
+| `add_assembly_joint` | Joint two parts (Fixed, Revolute, Cylindrical, Slider, Ball) |
+| `add_part_to_assembly` | Add a part to an existing assembly |
 | `select_geometry` | Interactive viewport picking for edges, faces, vertices |
 
 ### Skills

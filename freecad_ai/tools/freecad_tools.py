@@ -3472,6 +3472,8 @@ def _handle_create_assembly(
         if ground_first and added:
             ground = jg.newObject("App::FeaturePython", "GroundedJoint")
             JointObject.GroundedJoint(ground, added[0])
+            if ground.ViewObject and hasattr(JointObject, "ViewProviderGroundedJoint"):
+                JointObject.ViewProviderGroundedJoint(ground.ViewObject)
 
         labels = [o.Label for o in added]
         parts_str = [f"  - {l}" for l in labels]
@@ -3525,6 +3527,7 @@ def _find_sub_name(part, face_str):
     return face_str
 
 
+
 def _handle_add_assembly_joint(
     assembly_name: str,
     part1_name: str,
@@ -3573,6 +3576,8 @@ def _handle_add_assembly_joint(
         joint_label = label or f"{joint_type}_{part1.Label}_{part2.Label}"
         joint = jg.newObject("App::FeaturePython", joint_label)
         JointObject.Joint(joint, type_idx)
+        if joint.ViewObject and hasattr(JointObject, "ViewProviderJoint"):
+            JointObject.ViewProviderJoint(joint.ViewObject)
 
         # Set references: (body, ["Tip.FaceN", "Tip.FaceN"])
         # Duplicating the face sub-name means "use face center" (not a specific vertex)
@@ -3587,7 +3592,6 @@ def _handle_add_assembly_joint(
         joint.Placement2 = UtilsAssembly.findPlacement(joint.Reference2)
 
         # Pre-position the moving part before solving (replicates GUI's preSolve).
-        # The solver needs a good initial position to converge correctly.
         # preSolve checks JCS orientation and flips if needed for face-to-face contact.
         joint.Proxy.preSolve(joint)
 
@@ -3616,8 +3620,18 @@ ADD_ASSEMBLY_JOINT = ToolDefinition(
     description=(
         "Add a joint between two parts in an assembly by specifying which faces to mate. "
         "The second part is repositioned so its face meets the first part's face. "
-        "Use list_faces to find face names. For Fixed joints, faces are placed in contact "
-        "(normals opposing). Use describe_model or list_faces first to identify the correct faces."
+        "Use list_faces first to check face normals and positions.\n"
+        "FACE SELECTION GUIDE:\n"
+        "- Fixed (stacking): use top face of base + bottom face of part (e.g. Face6+Face5 for boxes)\n"
+        "- Fixed (side-by-side): use right face of part1 + left face of part2\n"
+        "- Revolute (hinge): use a SIDE face of the mount + an END face of the arm, "
+        "so the arm extends outward and rotates around the face normal\n"
+        "- Cylindrical: use the curved face (Face1) of a cylinder + a hole face\n"
+        "- Ball: REQUIRES spherical geometry — one part needs an additive sphere (ball), "
+        "the other a subtractive sphere (socket). Reference the spherical faces.\n"
+        "IMPORTANT: The rotation axis of Revolute/Cylindrical joints is the face normal. "
+        "For a horizontal hinge, connect vertical side faces (normal along X or Y). "
+        "For a vertical turntable, connect horizontal faces (normal along Z)."
     ),
     category="modeling",
     parameters=[
