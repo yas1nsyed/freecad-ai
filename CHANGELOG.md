@@ -7,12 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.7.0-alpha] - 2026-04-03
+
+Assembly tools, geometry query tools, rate limiting, and community contributions.
+
 ### Added
 
+- **Assembly tools** — `create_assembly`, `add_assembly_joint`, `add_part_to_assembly` using FreeCAD's native Assembly workbench solver. Supports Fixed, Revolute, Cylindrical, Slider, and Ball joint types. Includes face selection guide in tool descriptions for correct joint setup.
+- **`list_faces` tool** — list all faces of an object with names, descriptive labels (top, bottom, front, etc.), normals, center positions, and areas.
+- **`list_edges` tool** — list all edges with names, descriptive labels (top-front horizontal, etc.), and lengths.
+- **HTTP retry with exponential backoff** — `_http_post()` and `_http_stream()` now retry on 429 rate-limit errors with configurable max retries, Retry-After header support, and jittered exponential backoff.
+- **Enhanced context extraction** — Pad/Pocket features now include sketch plane, offset, and geometry count. Revolution features include axis reference and angle.
 - **Dark mode** — chat widget automatically adapts to FreeCAD's light/dark theme. Color palette cached for performance with `refresh_theme_cache()` available for runtime switching. (PR #5, @yas1nsyed)
 - **GUI active document resolution** — tools and `execute_code` now prefer `FreeCADGui.ActiveDocument.Document` over `App.ActiveDocument`, fixing desync when multiple documents are open. New `active_document.py` module with `resolve_active_document()` / `get_synced_active_document()`. (PR #3, @dpappo)
 - **OpenAI GPT-5 support** — `max_completion_tokens` instead of `max_tokens`, temperature omitted (GPT-5 rejects non-default values). Handled via `_apply_provider_overrides()`. (PR #3, @dpappo)
 - **Sandbox document copy** — `execute_code` subprocess sandbox now opens a temp copy of the saved `.FCStd` file so `getObject()`-style code validates against real document state instead of an empty `SandboxTest` doc. (PR #3, @dpappo)
+
+### Fixed
+
+- **Assembly ViewProvider** — joints and grounded joints now get proper ViewProvider setup for GUI integration (icons, Simulation support).
+- **OpenAI reasoning_content** — preserve `reasoning_content` field in message format for models that return chain-of-thought.
+- **Dark mode for all widgets** — extended theme support to all UI widgets, not just chat. Added sandbox GUI stub for headless environments.
 
 ## [0.6.0-alpha] - 2026-03-28
 
