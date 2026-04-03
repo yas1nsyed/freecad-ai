@@ -77,7 +77,7 @@ Configuration is stored at `~/.config/FreeCAD/FreeCADAI/config.json`.
 | OpenAI | Yes | GPT models |
 | Gemini | Yes | Google AI via OpenAI-compatible endpoint |
 | OpenRouter | Yes | Multi-provider gateway |
-| Moonshot | Yes | Kimi models (temperature locked) |
+| Moonshot | Yes | Kimi models (default params pre-configured) |
 | DeepSeek | Yes | DeepSeek-V3 |
 | Qwen | Yes | Alibaba DashScope (international) |
 | Groq | Yes | Ultra-fast inference |
@@ -93,6 +93,18 @@ Configuration is stored at `~/.config/FreeCAD/FreeCADAI/config.json`.
 | HuggingFace | Yes (`hf_...`) | Serverless inference API |
 | Zhipu | Yes | GLM models (z.ai international) |
 | Custom | Varies | Any OpenAI-compatible endpoint |
+
+### Model Parameters
+
+The **Model Parameters** table in Settings lets you set arbitrary sampling parameters (temperature, top_p, top_k, etc.) that are sent with each API request. Parameters are saved per model name — when you switch models, the saved parameters for that model are loaded automatically.
+
+Click **Load Defaults** to reset to the provider's recommended values. For most providers the only default is `temperature: 0.3`. Moonshot ships with pre-configured values required by Kimi-K2.5.
+
+#### Strip thinking from history
+
+The **"Strip thinking from conversation history"** checkbox in Settings controls whether thinking/reasoning content is removed from previous turns before sending to the API. Some models (e.g. Gemma 3/4) reject thinking content in multi-turn conversations, while others (e.g. Kimi-K2.5) require it.
+
+The checkbox is tristate: partially checked = auto-detect by model name (Gemma models strip automatically), checked = always strip, unchecked = never strip.
 
 ## Usage
 

@@ -30,6 +30,9 @@ QLabel = QtWidgets.QLabel
 Signal = QtCore.Signal
 QThread = QtCore.QThread
 QDoubleValidator = QtGui.QDoubleValidator
+QTableWidget = QtWidgets.QTableWidget
+QTableWidgetItem = QtWidgets.QTableWidgetItem
+QHeaderView = QtWidgets.QHeaderView
 
 QListWidget = QtWidgets.QListWidget
 QListWidgetItem = QtWidgets.QListWidgetItem
@@ -109,14 +112,19 @@ class SettingsDialog(QDialog):
 
         self.model_edit = QLineEdit()
         self.model_edit.setPlaceholderText(translate("SettingsDialog", "Model name"))
+        self.model_edit.editingFinished.connect(self._on_model_changed)
+        self._last_model_name = ""  # track model name for param save/load
         provider_layout.addRow(translate("SettingsDialog", "Model:"), self.model_edit)
 
         provider_group.setLayout(provider_layout)
         layout.addWidget(provider_group)
 
-        # Parameters group
-        params_group = QGroupBox(translate("SettingsDialog", "Parameters"))
-        params_layout = QFormLayout()
+        # Model Parameters group — fixed fields + freeform key-value table
+        model_params_group = QGroupBox(translate("SettingsDialog", "Model Parameters"))
+        model_params_layout = QVBoxLayout()
+
+        # Fixed fields (max tokens, context window)
+        fixed_layout = QFormLayout()
 
         self.max_tokens_spin = QSpinBox()
         self.max_tokens_spin.setRange(256, 262144)
@@ -127,12 +135,7 @@ class SettingsDialog(QDialog):
                       "Maximum output tokens per response.\n"
                       "Context window is determined by the model/provider.")
         )
-        params_layout.addRow(translate("SettingsDialog", "Max Output Tokens:"), self.max_tokens_spin)
-
-        self.temperature_edit = QLineEdit()
-        self.temperature_edit.setValidator(QDoubleValidator(0.0, 2.0, 2))
-        self.temperature_edit.setText("0.3")
-        params_layout.addRow(translate("SettingsDialog", "Temperature:"), self.temperature_edit)
+        fixed_layout.addRow(translate("SettingsDialog", "Max Output Tokens:"), self.max_tokens_spin)
 
         self.context_window_spin = QSpinBox()
         self.context_window_spin.setRange(4000, 1000000)
@@ -146,10 +149,56 @@ class SettingsDialog(QDialog):
                       "Set to your model's context limit or lower\n"
                       "to control API costs.")
         )
-        params_layout.addRow(translate("SettingsDialog", "Context Window:"), self.context_window_spin)
+        fixed_layout.addRow(translate("SettingsDialog", "Context Window:"), self.context_window_spin)
 
-        params_group.setLayout(params_layout)
-        layout.addWidget(params_group)
+        model_params_layout.addLayout(fixed_layout)
+
+        # Freeform sampling parameters table (saved per model name)
+        model_params_layout.addWidget(QLabel(
+            translate("SettingsDialog",
+                      "Sampling parameters sent with each request (saved per model):")
+        ))
+
+        self.model_params_table = QTableWidget(0, 2)
+        self.model_params_table.setHorizontalHeaderLabels([
+            translate("SettingsDialog", "Parameter"),
+            translate("SettingsDialog", "Value"),
+        ])
+        self.model_params_table.horizontalHeader().setStretchLastSection(True)
+        self.model_params_table.horizontalHeader().setSectionResizeMode(
+            0, QHeaderView.Interactive)
+        self.model_params_table.setColumnWidth(0, 160)
+        self.model_params_table.setMaximumHeight(140)
+        self.model_params_table.setToolTip(
+            translate("SettingsDialog",
+                      "Parameters are merged into the API request body.\n"
+                      "Common: temperature, top_p, top_k, n,\n"
+                      "presence_penalty, frequency_penalty, repetition_penalty.\n"
+                      "Values are auto-detected as number or string.")
+        )
+        model_params_layout.addWidget(self.model_params_table)
+
+        mp_btn_layout = QHBoxLayout()
+        mp_add_btn = QPushButton(translate("SettingsDialog", "Add"))
+        mp_add_btn.clicked.connect(self._add_model_param)
+        mp_btn_layout.addWidget(mp_add_btn)
+
+        mp_remove_btn = QPushButton(translate("SettingsDialog", "Remove"))
+        mp_remove_btn.clicked.connect(self._remove_model_param)
+        mp_btn_layout.addWidget(mp_remove_btn)
+
+        mp_defaults_btn = QPushButton(translate("SettingsDialog", "Load Defaults"))
+        mp_defaults_btn.setToolTip(
+            translate("SettingsDialog",
+                      "Load recommended parameters for the current provider"))
+        mp_defaults_btn.clicked.connect(self._load_default_model_params)
+        mp_btn_layout.addWidget(mp_defaults_btn)
+
+        mp_btn_layout.addStretch()
+        model_params_layout.addLayout(mp_btn_layout)
+
+        model_params_group.setLayout(model_params_layout)
+        layout.addWidget(model_params_group)
 
         # Behavior group
         behavior_group = QGroupBox(translate("SettingsDialog", "Behavior"))
@@ -183,6 +232,23 @@ class SettingsDialog(QDialog):
         thinking_layout.addWidget(self.thinking_combo)
         thinking_layout.addStretch()
         behavior_layout.addLayout(thinking_layout)
+
+        # Strip thinking history
+        self.strip_thinking_check = QCheckBox(
+            translate("SettingsDialog",
+                      "Strip thinking from conversation history")
+        )
+        self.strip_thinking_check.setToolTip(
+            translate("SettingsDialog",
+                      "Remove thinking/reasoning content from previous turns\n"
+                      "before sending to the API. Required by some models\n"
+                      "(e.g. Gemma) that reject thinking content in history.\n\n"
+                      "Auto-detected by model name. Check/uncheck to override.")
+        )
+        self.strip_thinking_check.setTristate(True)
+        self.strip_thinking_check.stateChanged.connect(
+            self._on_strip_thinking_changed)
+        behavior_layout.addWidget(self.strip_thinking_check)
 
         # System prompt
         prompt_group = QGroupBox(translate("SettingsDialog", "System Prompt"))
@@ -436,21 +502,18 @@ class SettingsDialog(QDialog):
         self.model_edit.setText(cfg.provider.model)
         self.max_tokens_spin.setValue(cfg.max_tokens)
         self.context_window_spin.setValue(cfg.context_window)
-        # Disable temperature for providers with fixed values
-        fixed = self._FIXED_TEMPERATURE_PROVIDERS.get(cfg.provider.name)
-        if fixed:
-            self.temperature_edit.setEnabled(False)
-            self.temperature_edit.setText("fixed")
-            self.temperature_edit.setToolTip(fixed)
-        else:
-            self.temperature_edit.setEnabled(True)
-            self.temperature_edit.setText(str(cfg.temperature))
-            self.temperature_edit.setToolTip("")
+
+        # Model parameters table
+        self._load_model_params_table(cfg.provider.model, cfg)
+
         self.enable_tools_check.setChecked(cfg.enable_tools)
         self.auto_execute_check.setChecked(cfg.auto_execute)
 
         thinking_map = {"off": 0, "on": 1, "extended": 2}
         self.thinking_combo.setCurrentIndex(thinking_map.get(cfg.thinking, 0))
+
+        # Strip thinking history — tristate: PartiallyChecked=auto, Checked=on, Unchecked=off
+        self._update_strip_thinking_ui(cfg.strip_thinking_history)
 
         # System prompt text: show override if set, otherwise generate default
         default_prompt = self._get_default_prompt_text()
@@ -491,32 +554,149 @@ class SettingsDialog(QDialog):
         # Hooks
         self._refresh_hooks_list()
 
-    # Providers that require fixed temperature values.
-    # Maps provider name → tooltip explaining the constraint.
-    _FIXED_TEMPERATURE_PROVIDERS = {
-        "moonshot": "Kimi-K2.5 requires fixed temperature (1.0 thinking / 0.6 non-thinking)",
-    }
-
     def _on_provider_changed(self, index):
-        """Update base URL and model when provider selection changes."""
+        """Update base URL, model, and default params when provider changes."""
         names = get_provider_names()
         if 0 <= index < len(names):
             name = names[index]
             preset = PROVIDER_PRESETS.get(name, {})
             self.base_url_edit.setText(preset.get("base_url", ""))
-            self.model_edit.setText(preset.get("default_model", ""))
+            model = preset.get("default_model", "")
+            self.model_edit.setText(model)
 
-            # Disable temperature for providers with fixed values
-            fixed = self._FIXED_TEMPERATURE_PROVIDERS.get(name)
-            if fixed:
-                self.temperature_edit.setEnabled(False)
-                self.temperature_edit.setText("fixed")
-                self.temperature_edit.setToolTip(fixed)
-            else:
-                self.temperature_edit.setEnabled(True)
-                self.temperature_edit.setToolTip("")
-                if self.temperature_edit.text() == "fixed":
-                    self.temperature_edit.setText("0.3")
+            # Load saved params for this model, or provider defaults
+            cfg = get_config()
+            self._load_model_params_table(model, cfg)
+
+    # ── Model Parameters table helpers ─────────────────────────
+
+    # ── Strip Thinking History helpers ─────────────────────────
+
+    def _update_strip_thinking_ui(self, value: bool | None):
+        """Set the tristate checkbox from config value.
+
+        None=auto (PartiallyChecked), True=on (Checked), False=off (Unchecked).
+        """
+        self.strip_thinking_check.stateChanged.disconnect(
+            self._on_strip_thinking_changed)
+        if value is None:
+            self.strip_thinking_check.setCheckState(QtCore.Qt.PartiallyChecked)
+        elif value:
+            self.strip_thinking_check.setCheckState(QtCore.Qt.Checked)
+        else:
+            self.strip_thinking_check.setCheckState(QtCore.Qt.Unchecked)
+        self.strip_thinking_check.stateChanged.connect(
+            self._on_strip_thinking_changed)
+
+    def _on_strip_thinking_changed(self, state):
+        """User toggled the checkbox — disable tristate once manually set."""
+        # Once the user clicks, it cycles Unchecked↔Checked (no more partial)
+        pass
+
+    def _read_strip_thinking_state(self) -> bool | None:
+        """Read the tristate checkbox as None/True/False."""
+        state = self.strip_thinking_check.checkState()
+        if state == QtCore.Qt.PartiallyChecked:
+            return None
+        return state == QtCore.Qt.Checked
+
+    def _on_model_changed(self):
+        """Save current params under the old model, load params for the new one."""
+        new_model = self.model_edit.text().strip()
+        if new_model == self._last_model_name or not new_model:
+            return
+        # Save current table under old model name (in-memory only)
+        cfg = get_config()
+        if self._last_model_name:
+            params = self._read_model_params_table()
+            if params:
+                cfg.model_params[self._last_model_name] = params
+        # Load params for new model
+        self._load_model_params_table(new_model, cfg)
+
+    def _load_model_params_table(self, model_name: str, cfg=None):
+        """Populate the params table for the given model.
+
+        Priority: saved params for this model > provider defaults > global temperature.
+        """
+        if cfg is None:
+            cfg = get_config()
+
+        params = cfg.model_params.get(model_name, {})
+        if not params:
+            # No saved params — try provider defaults
+            names = get_provider_names()
+            idx = self.provider_combo.currentIndex()
+            provider_name = names[idx] if 0 <= idx < len(names) else ""
+            preset = PROVIDER_PRESETS.get(provider_name, {})
+            params = dict(preset.get("default_params", {}))
+        if not params:
+            # Fallback: just temperature from global config
+            params = {"temperature": cfg.temperature}
+
+        self._last_model_name = model_name
+        self._populate_model_params_table(params)
+
+    def _populate_model_params_table(self, params: dict):
+        """Fill the table widget from a params dict."""
+        self.model_params_table.setRowCount(0)
+        for key, value in params.items():
+            row = self.model_params_table.rowCount()
+            self.model_params_table.insertRow(row)
+            self.model_params_table.setItem(row, 0, QTableWidgetItem(str(key)))
+            self.model_params_table.setItem(row, 1, QTableWidgetItem(str(value)))
+
+    def _read_model_params_table(self) -> dict:
+        """Read the current params table into a dict, auto-casting values."""
+        params = {}
+        for row in range(self.model_params_table.rowCount()):
+            key_item = self.model_params_table.item(row, 0)
+            val_item = self.model_params_table.item(row, 1)
+            if not key_item or not val_item:
+                continue
+            key = key_item.text().strip()
+            val_str = val_item.text().strip()
+            if not key:
+                continue
+            # Auto-cast value: try int, then float, then keep as string
+            try:
+                # Distinguish int from float: "64" → int, "0.95" → float
+                if "." in val_str or "e" in val_str.lower():
+                    params[key] = float(val_str)
+                else:
+                    params[key] = int(val_str)
+            except ValueError:
+                # Boolean or string
+                if val_str.lower() in ("true", "false"):
+                    params[key] = val_str.lower() == "true"
+                else:
+                    params[key] = val_str
+        return params
+
+    def _add_model_param(self):
+        """Add an empty row to the model params table."""
+        row = self.model_params_table.rowCount()
+        self.model_params_table.insertRow(row)
+        self.model_params_table.setItem(row, 0, QTableWidgetItem(""))
+        self.model_params_table.setItem(row, 1, QTableWidgetItem(""))
+        self.model_params_table.editItem(self.model_params_table.item(row, 0))
+
+    def _remove_model_param(self):
+        """Remove the selected row from the model params table."""
+        row = self.model_params_table.currentRow()
+        if row >= 0:
+            self.model_params_table.removeRow(row)
+
+    def _load_default_model_params(self):
+        """Reset the params table to provider defaults."""
+        names = get_provider_names()
+        idx = self.provider_combo.currentIndex()
+        provider_name = names[idx] if 0 <= idx < len(names) else ""
+        preset = PROVIDER_PRESETS.get(provider_name, {})
+        params = dict(preset.get("default_params", {}))
+        if not params:
+            params = {"temperature": 0.3}
+        self._populate_model_params_table(params)
 
     def _get_default_prompt_text(self) -> str:
         """Generate the default system prompt for the current settings."""
@@ -541,16 +721,25 @@ class SettingsDialog(QDialog):
         cfg.max_tokens = self.max_tokens_spin.value()
         cfg.context_window = self.context_window_spin.value()
 
-        try:
-            cfg.temperature = float(self.temperature_edit.text())
-        except ValueError:
-            cfg.temperature = 0.3
+        # Save model parameters for the current model
+        model_name = self.model_edit.text().strip()
+        if model_name:
+            params = self._read_model_params_table()
+            if params:
+                cfg.model_params[model_name] = params
+            elif model_name in cfg.model_params:
+                del cfg.model_params[model_name]
+            # Keep global temperature in sync for backward compat
+            cfg.temperature = params.get("temperature", cfg.temperature)
 
         cfg.enable_tools = self.enable_tools_check.isChecked()
         cfg.auto_execute = self.auto_execute_check.isChecked()
 
         thinking_values = ["off", "on", "extended"]
         cfg.thinking = thinking_values[self.thinking_combo.currentIndex()]
+
+        # Strip thinking history — tristate checkbox
+        cfg.strip_thinking_history = self._read_strip_thinking_state()
 
         # Save system prompt override (empty if user hasn't changed from default)
         custom_text = self.system_prompt_edit.toPlainText().strip()
@@ -650,10 +839,14 @@ class SettingsDialog(QDialog):
             cfg.context_window = self.context_window_spin.value()
         except Exception:
             pass
-        try:
-            cfg.temperature = float(self.temperature_edit.text())
-        except ValueError:
-            pass
+
+        # Apply model params temporarily for test connection
+        model_name = self.model_edit.text().strip()
+        if model_name:
+            params = self._read_model_params_table()
+            if params:
+                cfg.model_params[model_name] = params
+                cfg.temperature = params.get("temperature", cfg.temperature)
 
         thinking_values = ["off", "on", "extended"]
         cfg.thinking = thinking_values[self.thinking_combo.currentIndex()]

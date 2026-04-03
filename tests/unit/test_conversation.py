@@ -341,3 +341,94 @@ class TestCompactionEnabled:
         assert conv.needs_compaction() is False
         conv.compaction_enabled = True
         assert conv.needs_compaction() is True
+
+
+class TestStripThinking:
+    """Tests for stripping reasoning_content from conversation history."""
+
+    def test_reasoning_content_preserved_by_default(self):
+        c = Conversation()
+        c.add_user_message("Hello")
+        c.messages.append({
+            "role": "assistant",
+            "content": "Hi",
+            "reasoning_content": "Let me think...",
+        })
+        msgs = c.get_messages_for_api(api_style="openai", strip_thinking=False)
+        assistant = [m for m in msgs if m["role"] == "assistant"][0]
+        assert "reasoning_content" in assistant
+        assert assistant["reasoning_content"] == "Let me think..."
+
+    def test_reasoning_content_stripped_when_requested(self):
+        c = Conversation()
+        c.add_user_message("Hello")
+        c.messages.append({
+            "role": "assistant",
+            "content": "Hi",
+            "reasoning_content": "Let me think...",
+        })
+        msgs = c.get_messages_for_api(api_style="openai", strip_thinking=True)
+        assistant = [m for m in msgs if m["role"] == "assistant"][0]
+        assert "reasoning_content" not in assistant
+
+    def test_strip_thinking_with_tool_calls(self):
+        c = Conversation()
+        c.add_user_message("Do something")
+        c.messages.append({
+            "role": "assistant",
+            "content": None,
+            "tool_calls": [{"id": "tc1", "name": "test", "arguments": {}}],
+            "reasoning_content": "I should call the tool",
+        })
+        c.add_tool_result("tc1", "Done")
+        msgs = c.get_messages_for_api(api_style="openai", strip_thinking=True)
+        assistant = [m for m in msgs if m["role"] == "assistant"][0]
+        assert "reasoning_content" not in assistant
+        assert "tool_calls" in assistant
+
+    def test_strip_thinking_no_effect_on_anthropic(self):
+        """Anthropic format doesn't use reasoning_content field."""
+        c = Conversation()
+        c.add_user_message("Hello")
+        c.messages.append({
+            "role": "assistant",
+            "content": "Hi",
+            "reasoning_content": "Thinking...",
+        })
+        msgs = c.get_messages_for_api(api_style="anthropic", strip_thinking=True)
+        # Anthropic format doesn't have reasoning_content at all
+        assistant = [m for m in msgs if m["role"] == "assistant"][0]
+        assert "reasoning_content" not in assistant
+
+
+class TestShouldStripThinking:
+    """Tests for the should_strip_thinking() helper."""
+
+    def test_gemma_model_strips_by_default(self):
+        from freecad_ai.llm.client import should_strip_thinking
+        assert should_strip_thinking("gemma4:27b") is True
+        assert should_strip_thinking("gemma3:12b") is True
+
+    def test_non_gemma_preserves_by_default(self):
+        from freecad_ai.llm.client import should_strip_thinking
+        assert should_strip_thinking("kimi-k2.5") is False
+        assert should_strip_thinking("qwen3:32b") is False
+        assert should_strip_thinking("llama3") is False
+
+    def test_user_override_true(self):
+        from freecad_ai.llm.client import should_strip_thinking
+        assert should_strip_thinking("llama3", override=True) is True
+
+    def test_user_override_false(self):
+        from freecad_ai.llm.client import should_strip_thinking
+        assert should_strip_thinking("gemma4:27b", override=False) is False
+
+    def test_auto_detect_when_none(self):
+        from freecad_ai.llm.client import should_strip_thinking
+        assert should_strip_thinking("gemma4:27b", override=None) is True
+        assert should_strip_thinking("llama3", override=None) is False
+
+    def test_empty_model_name(self):
+        from freecad_ai.llm.client import should_strip_thinking
+        assert should_strip_thinking("") is False
+        assert should_strip_thinking(None) is False

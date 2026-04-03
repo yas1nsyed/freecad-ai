@@ -21,7 +21,11 @@ HOOKS_DIR = os.path.join(CONFIG_DIR, "hooks")
 from .llm.providers import PROVIDERS as _PROVIDERS
 
 PROVIDER_PRESETS = {
-    name: {"base_url": p["base_url"], "default_model": p["default_model"]}
+    name: {
+        "base_url": p["base_url"],
+        "default_model": p["default_model"],
+        "default_params": p.get("default_params", {}),
+    }
     for name, p in _PROVIDERS.items()
 }
 
@@ -48,10 +52,14 @@ class AppConfig:
     max_tokens: int = 4096
     context_window: int = 20000  # tokens — compaction triggers above this
     temperature: float = 0.3
+    model_params: dict = field(default_factory=dict)
+    # Per-model parameter overrides, keyed by model name:
+    # {"gemma4:27b": {"temperature": 1.0, "top_p": 0.95, "top_k": 64}, ...}
     auto_execute: bool = False
     max_retries: int = 3
     enable_tools: bool = True
     thinking: str = "off"  # "off", "on", "extended"
+    strip_thinking_history: bool | None = None  # None=auto-detect, True/False=override
     viewport_capture: str = "off"  # "off", "every_message", "after_changes"
     viewport_resolution: str = "medium"  # "low", "medium", "high"
     mcp_servers: list = field(default_factory=list)

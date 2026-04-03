@@ -42,6 +42,13 @@ PROVIDERS = {
         "default_model": "kimi-k2.5",
         "api_style": "openai",
         "supports_tools": True,
+        "default_params": {
+            "temperature": 0.6,
+            "top_p": 0.95,
+            "n": 1,
+            "presence_penalty": 0.0,
+            "frequency_penalty": 0.0,
+        },
     },
     "deepseek": {
         "base_url": "https://api.deepseek.com/v1",
@@ -144,6 +151,11 @@ def get_api_style(provider_name: str) -> str:
 def supports_tools(provider_name: str) -> bool:
     """Return whether a provider supports native tool calling."""
     return PROVIDERS.get(provider_name, {}).get("supports_tools", False)
+
+
+def get_default_params(provider_name: str) -> dict:
+    """Return the default model parameters for a provider (empty if none)."""
+    return dict(PROVIDERS.get(provider_name, {}).get("default_params", {}))
 
 
 def get_provider_names() -> list[str]:

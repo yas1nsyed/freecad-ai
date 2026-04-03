@@ -84,17 +84,22 @@ class _LLMWorker(QThread):
         self._tool_result_wait = QtCore.QWaitCondition()
         self._pending_result = None
         self._max_tool_turns = 30  # Safety limit
+        self._strip_thinking = False  # resolved in run()
 
     def run(self):
         try:
-            from ..llm.client import create_client_from_config
+            from ..llm.client import create_client_from_config, should_strip_thinking
+            from ..config import get_config as _get_config
             client = create_client_from_config()
+            self._strip_thinking = should_strip_thinking(
+                client.model, _get_config().strip_thinking_history)
 
             # Re-format messages with image interception on worker thread
             if self.conversation and self.describe_fn:
                 wrapped = self._wrap_describe_fn(self.describe_fn)
                 self.messages = self.conversation.get_messages_for_api(
-                    api_style=self.api_style, describe_fn=wrapped
+                    api_style=self.api_style, describe_fn=wrapped,
+                    strip_thinking=self._strip_thinking,
                 )
 
             if not self.tools:
@@ -201,9 +206,9 @@ class _LLMWorker(QThread):
                     "content": turn_text or None,
                     "tool_calls": oai_tcs,
                 }
-                # Preserve reasoning_content for providers that require it
-                # (e.g. Moonshot/Kimi-K2.5 with thinking enabled)
-                if turn_thinking:
+                # Preserve reasoning_content unless the model wants it stripped
+                # (e.g. Gemma strips thinking; Kimi-K2.5 requires it)
+                if turn_thinking and not self._strip_thinking:
                     assistant_msg["reasoning_content"] = turn_thinking
                 messages.append(assistant_msg)
 
@@ -1170,7 +1175,11 @@ class ChatDockWidget(QDockWidget):
                 conversation_ref = self.conversation
 
         # Get messages for API
-        messages = self.conversation.get_messages_for_api(api_style=api_style)
+        from ..llm.client import should_strip_thinking
+        strip = should_strip_thinking(
+            cfg.provider.model, cfg.strip_thinking_history)
+        messages = self.conversation.get_messages_for_api(
+            api_style=api_style, strip_thinking=strip)
 
         # Start streaming
         self._set_loading(True)
@@ -1642,9 +1651,13 @@ class ChatDockWidget(QDockWidget):
         self._append_html(render_message("system", error_msg))
 
         from ..core.system_prompt import build_system_prompt
+        from ..llm.client import should_strip_thinking
         mode = "plan" if self.mode_combo.currentIndex() == 0 else "act"
         system_prompt = build_system_prompt(mode=mode)
-        messages = self.conversation.get_messages_for_api()
+        cfg = get_config()
+        strip = should_strip_thinking(
+            cfg.provider.model, cfg.strip_thinking_history)
+        messages = self.conversation.get_messages_for_api(strip_thinking=strip)
 
         self._set_loading(True)
         self._streaming_html = ""

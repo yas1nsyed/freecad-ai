@@ -381,7 +381,12 @@ class SkillEvaluator:
 
             logger.info("Eval turn %d/%d (%.0fs elapsed, %d tool calls)",
                         _turn + 1, budget, elapsed, tool_calls)
-            messages = conv.get_messages_for_api(api_style=api_style)
+            from ..llm.client import should_strip_thinking
+            from ..config import get_config as _get_cfg
+            strip = should_strip_thinking(
+                client.model, _get_cfg().strip_thinking_history)
+            messages = conv.get_messages_for_api(
+                api_style=api_style, strip_thinking=strip)
             try:
                 response = client.send_with_tools(
                     messages, system=system_prompt, tools=tools_schema

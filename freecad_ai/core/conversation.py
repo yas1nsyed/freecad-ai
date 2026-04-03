@@ -77,12 +77,18 @@ class Conversation:
 
     def get_messages_for_api(self, max_chars: int = 100000,
                              api_style: str = "openai",
-                             describe_fn=None) -> list[dict]:
+                             describe_fn=None,
+                             strip_thinking: bool = False) -> list[dict]:
         """Get messages formatted for the LLM API.
 
         Truncates older messages if the total content exceeds max_chars.
         Converts from internal format to provider-specific format.
         Never splits a tool_call/tool_result pair during truncation.
+
+        Args:
+            strip_thinking: If True, remove reasoning_content from assistant
+                messages in the history.  Required by models like Gemma that
+                reject thinking content in multi-turn conversations.
         """
         if not self.messages:
             return []
@@ -138,9 +144,10 @@ class Conversation:
         if api_style == "anthropic":
             return self._to_anthropic_format(result)
         else:
-            return self._to_openai_format(result)
+            return self._to_openai_format(result, strip_thinking=strip_thinking)
 
-    def _to_openai_format(self, messages: list[dict]) -> list[dict]:
+    def _to_openai_format(self, messages: list[dict],
+                          strip_thinking: bool = False) -> list[dict]:
         """Convert internal messages to OpenAI API format."""
         result = []
         for msg in messages:
@@ -166,7 +173,7 @@ class Conversation:
                         for tc in msg["tool_calls"]
                     ],
                 }
-                if msg.get("reasoning_content"):
+                if msg.get("reasoning_content") and not strip_thinking:
                     oai_msg["reasoning_content"] = msg["reasoning_content"]
                 result.append(oai_msg)
             elif isinstance(msg.get("content"), list):
@@ -184,7 +191,7 @@ class Conversation:
                 result.append({"role": msg["role"], "content": oai_blocks})
             else:
                 out = {"role": msg["role"], "content": msg["content"]}
-                if msg.get("reasoning_content"):
+                if msg.get("reasoning_content") and not strip_thinking:
                     out["reasoning_content"] = msg["reasoning_content"]
                 result.append(out)
         return result

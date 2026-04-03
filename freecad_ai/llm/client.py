@@ -126,7 +126,7 @@ class LLMClient:
 
     def __init__(self, provider_name: str, base_url: str, api_key: str,
                  model: str, max_tokens: int = 4096, temperature: float = 0.3,
-                 thinking: str = "off"):
+                 thinking: str = "off", model_params: dict | None = None):
         self.provider_name = provider_name
         self.base_url = base_url.rstrip("/")
         self.api_key = api_key
@@ -134,6 +134,7 @@ class LLMClient:
         self.max_tokens = max_tokens
         self.temperature = temperature
         self.thinking = thinking  # "off", "on", "extended"
+        self.model_params = model_params or {}  # freeform per-model params
         self.api_style = get_api_style(provider_name)
 
         # SSL context for HTTPS requests.
@@ -316,10 +317,19 @@ class LLMClient:
         body = {
             "model": self.model,
             "messages": msgs,
-            "temperature": self.temperature,
+            "temperature": self.model_params.get("temperature", self.temperature),
             "stream": stream,
             "max_tokens": self.max_tokens,
         }
+        # Merge freeform model params (top_p, top_k, etc.) into body.
+        # Keys already set above (model, messages, stream, max_tokens) are
+        # not overwritten — only new keys like top_p, top_k, n, etc. are added.
+        _RESERVED = {"model", "messages", "stream", "max_tokens", "temperature",
+                      "tools", "tool_choice"}
+        for key, value in self.model_params.items():
+            if key not in _RESERVED:
+                body[key] = value
+
         if tools:
             body["tools"] = tools
             body["tool_choice"] = "auto"
@@ -328,31 +338,20 @@ class LLMClient:
             effort_map = {"on": "medium", "extended": "high"}
             body["reasoning_effort"] = effort_map.get(self.thinking, "medium")
 
-        # Provider-specific parameter overrides
+        # Provider-specific API transformations
         self._apply_provider_overrides(body)
 
         return body
 
     def _apply_provider_overrides(self, body: dict) -> None:
-        """Apply provider-specific parameter constraints.
+        """Apply provider-specific API transformations.
 
-        Some providers require fixed parameter values and will reject
-        requests with non-standard values.  This method overrides the
-        user-configured values to match provider requirements.
+        These are structural changes the API requires (parameter renames,
+        removals) — NOT sampling parameter defaults.  Sampling defaults
+        belong in providers.py ``default_params`` and are user-editable
+        via the Model Parameters table in Settings.
         """
-        if self.provider_name == "moonshot":
-            # Kimi-K2.5 requires fixed sampling parameters.
-            # Thinking mode: temperature=1.0, top_p=0.95
-            # Non-thinking:  temperature=0.6, top_p=0.95
-            if self.thinking != "off":
-                body["temperature"] = 1.0
-            else:
-                body["temperature"] = 0.6
-            body["top_p"] = 0.95
-            body["n"] = 1
-            body["presence_penalty"] = 0.0
-            body["frequency_penalty"] = 0.0
-        elif self.provider_name == "openai" and (self.model or "").lower().startswith("gpt-5"):
+        if self.provider_name == "openai" and (self.model or "").lower().startswith("gpt-5"):
             # Official OpenAI Chat Completions: gpt-5.x rejects max_tokens and non-default temperature.
             body.pop("temperature", None)
             if "max_tokens" in body:
@@ -543,7 +542,9 @@ class LLMClient:
                 "budget_tokens": budget,
             }
         else:
-            body["temperature"] = self.temperature
+            body["temperature"] = self.model_params.get(
+                "temperature", self.temperature
+            )
         if system:
             body["system"] = system
         if tools:
@@ -769,10 +770,33 @@ class LLMClient:
             resp.close()
 
 
+# Models that require thinking content to be stripped from conversation
+# history.  Matched case-insensitively against the start of the model name.
+_STRIP_THINKING_MODELS = (
+    "gemma",     # Gemma 3/4: "No Thinking Content in History"
+)
+
+
+def should_strip_thinking(model: str, override: bool | None = None) -> bool:
+    """Determine whether thinking/reasoning content should be stripped from history.
+
+    Args:
+        model: Model name string.
+        override: Explicit user setting from config.strip_thinking_history.
+            None=auto-detect from model name, True/False=user override.
+    """
+    if override is not None:
+        return override
+    model_lower = (model or "").lower()
+    return any(model_lower.startswith(prefix) for prefix in _STRIP_THINKING_MODELS)
+
+
 def create_client_from_config() -> LLMClient:
     """Create an LLMClient from the current application config."""
     from ..config import get_config
     cfg = get_config()
+    # Resolve per-model params: saved params for this model, or empty dict.
+    model_params = cfg.model_params.get(cfg.provider.model, {})
     return LLMClient(
         provider_name=cfg.provider.name,
         base_url=cfg.provider.base_url,
@@ -781,4 +805,5 @@ def create_client_from_config() -> LLMClient:
         max_tokens=cfg.max_tokens,
         temperature=cfg.temperature,
         thinking=cfg.thinking,
+        model_params=model_params,
     )
