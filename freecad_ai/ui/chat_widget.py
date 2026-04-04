@@ -10,6 +10,7 @@ tool calls on the main thread, feed results back to the LLM.
 """
 
 import json
+import time
 
 from .compat import QtWidgets, QtCore, QtGui
 from ..i18n import translate
@@ -85,6 +86,7 @@ class _LLMWorker(QThread):
         self._pending_result = None
         self._max_tool_turns = 30  # Safety limit
         self._strip_thinking = False  # resolved in run()
+        self._tool_timeline = []  # timing data for summary visualization
 
     def run(self):
         try:
@@ -225,6 +227,7 @@ class _LLMWorker(QThread):
                     "arguments": tc.arguments,
                     "turn": turn,
                 })
+                t0 = time.time()
                 if hook_result.get("block"):
                     result = {"success": False, "output": "",
                               "error": f"Blocked by hook: {hook_result.get('reason', '')}"}
@@ -233,10 +236,17 @@ class _LLMWorker(QThread):
                     result = {"success": tr.success, "output": tr.output, "error": tr.error}
                 else:
                     result = self._execute_tool_on_main_thread(tc.name, tc.arguments)
+                elapsed = time.time() - t0
                 success = result.get("success", False)
                 output = result.get("output", "")
                 error = result.get("error", "")
                 result_text = output if success else f"Error: {error}"
+
+                # Track timing for summary
+                self._tool_timeline.append({
+                    "name": tc.name, "success": success,
+                    "elapsed": elapsed, "turn": turn,
+                })
 
                 self.tool_call_finished.emit(tc.name, tc.id, success, result_text)
 
@@ -1193,6 +1203,7 @@ class ChatDockWidget(QDockWidget):
 
         self._in_thinking = False
         self._tool_results_stored = False
+        self._summary_rendered = False
         self._worker = _LLMWorker(
             messages, system_prompt,
             tools=tools_schema, registry=self._tool_registry,
@@ -1411,6 +1422,12 @@ class ChatDockWidget(QDockWidget):
 
         # Re-render the full chat to get proper code block formatting
         self._rerender_chat()
+
+        # Tool call summary (after re-render so it's not wiped)
+        if self._worker and self._worker._tool_timeline and not getattr(self, '_summary_rendered', False):
+            self._summary_rendered = True
+            from .message_view import render_tool_summary
+            self._append_html(render_tool_summary(self._worker._tool_timeline))
 
         # Handle code execution based on mode (only if tools were NOT used)
         mode = "plan" if self.mode_combo.currentIndex() == 0 else "act"

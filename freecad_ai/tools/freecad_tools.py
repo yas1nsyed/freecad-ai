@@ -969,10 +969,21 @@ def _handle_fillet_edges(
         edge_refs = _coerce_str_list(edges) or ["Edge1"]
 
         # Check if this is a PartDesign body/feature
-        body = _find_body_for(doc, obj)
+        # If obj IS a Body, use its Tip (last feature) as the fillet base
+        body = None
+        base_feature = obj
+        if hasattr(obj, "TypeId") and obj.TypeId == "PartDesign::Body":
+            body = obj
+            base_feature = obj.Tip
+            if not base_feature:
+                return ToolResult(success=False, output="",
+                                  error=f"Body '{obj.Label}' has no features to fillet.")
+        else:
+            body = _find_body_for(doc, obj)
+
         if body:
             fillet = body.newObject("PartDesign::Fillet", label or "Fillet")
-            fillet.Base = (obj, edge_refs)
+            fillet.Base = (base_feature, edge_refs)
             fillet.Radius = radius
         else:
             fillet = doc.addObject("Part::Fillet", label or "Fillet")
@@ -1023,10 +1034,21 @@ def _handle_chamfer_edges(
 
         edge_refs = _coerce_str_list(edges) or ["Edge1"]
 
-        body = _find_body_for(doc, obj)
+        # If obj IS a Body, use its Tip (last feature) as the chamfer base
+        body = None
+        base_feature = obj
+        if hasattr(obj, "TypeId") and obj.TypeId == "PartDesign::Body":
+            body = obj
+            base_feature = obj.Tip
+            if not base_feature:
+                return ToolResult(success=False, output="",
+                                  error=f"Body '{obj.Label}' has no features to chamfer.")
+        else:
+            body = _find_body_for(doc, obj)
+
         if body:
             chamfer = body.newObject("PartDesign::Chamfer", label or "Chamfer")
-            chamfer.Base = (obj, edge_refs)
+            chamfer.Base = (base_feature, edge_refs)
             chamfer.Size = size
         else:
             chamfer = doc.addObject("Part::Chamfer", label or "Chamfer")
@@ -2669,10 +2691,21 @@ def _handle_shell_object(
         face_refs = _coerce_str_list(faces) or ["Face1"]
         join_map = {"Arc": 0, "Intersection": 1}
 
-        body = _find_body_for(doc, obj)
+        # If obj IS a Body, use its Tip (last feature) as the shell base
+        body = None
+        base_feature = obj
+        if hasattr(obj, "TypeId") and obj.TypeId == "PartDesign::Body":
+            body = obj
+            base_feature = obj.Tip
+            if not base_feature:
+                return ToolResult(success=False, output="",
+                                  error=f"Body '{obj.Label}' has no features to shell.")
+        else:
+            body = _find_body_for(doc, obj)
+
         if body:
             shell = body.newObject("PartDesign::Thickness", label or "Shell")
-            shell.Base = (obj, face_refs)
+            shell.Base = (base_feature, face_refs)
             shell.Value = thickness
             shell.Join = join_map.get(join, 0)
             shell.Reversed = reversed

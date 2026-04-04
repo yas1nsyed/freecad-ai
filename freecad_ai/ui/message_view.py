@@ -358,6 +358,76 @@ def render_tool_call(tool_name: str, call_id: str, started: bool = True,
         return "".join(parts)
 
 
+def render_tool_summary(timeline: list[dict]) -> str:
+    """Render a compact summary of tool calls after the agentic loop.
+
+    Args:
+        timeline: List of dicts with keys: name, success, elapsed, turn.
+
+    Returns HTML for a summary panel showing tool flow, counts, and timing.
+    """
+    if not timeline:
+        return ""
+
+    colors = _get_theme_colors()
+    total = len(timeline)
+    succeeded = sum(1 for t in timeline if t["success"])
+    failed = total - succeeded
+    total_time = sum(t["elapsed"] for t in timeline)
+
+    # Build flow diagram: tool1 → tool2 → tool3
+    flow_parts = []
+    for t in timeline:
+        name = html.escape(t["name"])
+        if t["success"]:
+            flow_parts.append(
+                f'<span style="color: {colors["tool_success_text"]};">{name}</span>')
+        else:
+            flow_parts.append(
+                f'<span style="color: {colors["tool_error_text"]};">{name}</span>')
+    flow_html = ' <span style="color: {col};">&rarr;</span> '.format(
+        col=colors["thinking_text"]).join(flow_parts)
+
+    # Stats line
+    if failed:
+        stats = translate("MessageView",
+                          "{total} tools ({succeeded} ok, {failed} failed) in {time:.1f}s"
+                          ).format(total=total, succeeded=succeeded,
+                                   failed=failed, time=total_time)
+    else:
+        stats = translate("MessageView",
+                          "{total} tools in {time:.1f}s"
+                          ).format(total=total, time=total_time)
+
+    # Per-tool timing (compact)
+    timing_parts = []
+    for t in timeline:
+        name = html.escape(t["name"])
+        ms = t["elapsed"] * 1000
+        if ms >= 1000:
+            time_str = f"{t['elapsed']:.1f}s"
+        else:
+            time_str = f"{ms:.0f}ms"
+        icon = "&#10003;" if t["success"] else "&#10007;"
+        col = colors["tool_success_text"] if t["success"] else colors["tool_error_text"]
+        timing_parts.append(
+            f'<span style="color: {col};">{icon}</span> {name} '
+            f'<span style="color: {colors["thinking_text"]};">{time_str}</span>')
+    timing_html = " &middot; ".join(timing_parts)
+
+    return (
+        f'<div style="margin: 8px 0 4px 0; padding: 8px 10px; '
+        f'background-color: {colors["code_bg"]}; '
+        f'border: 1px solid {colors["code_border"]}; '
+        f'border-radius: 4px; font-size: 11px;">'
+        f'<div style="margin-bottom: 4px; color: {colors["thinking_label"]};">'
+        f'&#9881; {stats}</div>'
+        f'<div style="margin-bottom: 4px; line-height: 1.6;">{flow_html}</div>'
+        f'<div style="color: {colors["code_text"]}; line-height: 1.6;">{timing_html}</div>'
+        f'</div>'
+    )
+
+
 def _render_thinking_block(thinking_text: str) -> str:
     """Render a <think> block as a dimmed, collapsible-style block."""
     colors = _get_theme_colors()
