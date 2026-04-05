@@ -403,11 +403,37 @@ def _handle_create_sketch(
                 except Exception:
                     pass  # Skip invalid constraints
 
+        # Report constraint status so the LLM can self-correct
+        constraint_count = sketch.ConstraintCount
+        constraint_status = ""
+        try:
+            if sketch.FullyConstrained:
+                constraint_status = " Fully constrained."
+            else:
+                # solve() returns 0 if solved, positive = under-constrained DOF
+                dof = sketch.solve()
+                if dof > 0:
+                    constraint_status = (
+                        f" Under-constrained ({dof} DOF remaining)"
+                        " — add constraints to fully define the sketch."
+                    )
+                elif dof < 0:
+                    constraint_status = (
+                        " Over-constrained — remove redundant constraints."
+                    )
+                else:
+                    constraint_status = " Fully constrained."
+        except Exception:
+            pass  # solve() not available in all versions
+
         return ToolResult(
             success=True,
-            output=(f"Created sketch '{sketch.Name}' with {geo_count} geometries."
+            output=(f"Created sketch '{sketch.Name}' with {geo_count} geometries"
+                    f" and {constraint_count} constraints.{constraint_status}"
                     f" Use sketch_name='{sketch.Name}' in pad_sketch/pocket_sketch."),
-            data={"name": sketch.Name, "label": sketch.Label, "geometry_count": geo_count},
+            data={"name": sketch.Name, "label": sketch.Label,
+                  "geometry_count": geo_count, "constraint_count": constraint_count,
+                  "fully_constrained": getattr(sketch, "FullyConstrained", None)},
         )
 
     return _with_undo("Create Sketch", do)

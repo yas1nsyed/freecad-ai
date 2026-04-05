@@ -150,6 +150,14 @@ def _get_key_properties(obj) -> list[str]:
             parts = [f"{geo_count} geometries", f"{constraint_count} constraints"]
             if support:
                 parts.insert(0, support)
+            # Constraint status
+            try:
+                if obj.FullyConstrained:
+                    parts.append("fully constrained")
+                else:
+                    parts.append("under-constrained")
+            except Exception:
+                pass
             props.extend(parts)
         except Exception:
             pass
