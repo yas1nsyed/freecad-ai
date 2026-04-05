@@ -1938,10 +1938,7 @@ def _handle_create_variable_set(
     variables: dict | None = None,
     label: str = "Variables",
 ) -> ToolResult:
-    """Create a variable set for parametric modeling.
-
-    Tries App::VarSet first (FreeCAD 1.0+), falls back to Spreadsheet.
-    """
+    """Create an App::VarSet with typed properties for parametric modeling."""
 
     def do(doc):
         if not variables:
@@ -1949,7 +1946,6 @@ def _handle_create_variable_set(
                               error="No variables provided. Pass a dict like "
                                     "{\"length\": 50, \"width\": 30}.")
 
-        # Property type mapping
         _PROP_TYPES = {
             int: "App::PropertyInteger",
             float: "App::PropertyFloat",
@@ -1957,61 +1953,34 @@ def _handle_create_variable_set(
             bool: "App::PropertyBool",
         }
 
-        # Try VarSet first (FreeCAD 1.0+), fall back to Spreadsheet
-        try:
-            vs = doc.addObject("App::VarSet", label)
-            var_names = []
-            for name, value in variables.items():
-                prop_type = _PROP_TYPES.get(type(value), "App::PropertyFloat")
-                try:
-                    vs.addProperty(prop_type, name, "Parameters", "")
-                    setattr(vs, name, value)
-                except Exception as e:
-                    return ToolResult(
-                        success=False, output="",
-                        error=f"Invalid variable name '{name}': {e}")
-                var_names.append(name)
+        vs = doc.addObject("App::VarSet", label)
+        var_names = []
+        for name, value in variables.items():
+            prop_type = _PROP_TYPES.get(type(value), "App::PropertyFloat")
+            try:
+                vs.addProperty(prop_type, name, "Parameters", "")
+                setattr(vs, name, value)
+            except Exception as e:
+                return ToolResult(
+                    success=False, output="",
+                    error=f"Invalid variable name '{name}': {e}")
+            var_names.append(name)
 
-            doc.recompute()
-            backend = "VarSet"
-            obj_name = vs.Name
-            obj_label = vs.Label
-        except Exception:
-            # Fallback: Spreadsheet with aliases
-            sheet = doc.addObject("Spreadsheet::Sheet", label)
-            var_names = []
-            for i, (name, value) in enumerate(variables.items()):
-                row = i + 1
-                cell = f"A{row}"
-                sheet.set(f"B{row}", str(name))
-                sheet.set(cell, str(value))
-                try:
-                    sheet.setAlias(cell, name)
-                except Exception as e:
-                    return ToolResult(
-                        success=False, output="",
-                        error=f"Invalid variable name '{name}': {e}. "
-                              "Avoid names that look like cell addresses.")
-                var_names.append(name)
-
-            doc.recompute()
-            backend = "Spreadsheet"
-            obj_name = sheet.Name
-            obj_label = sheet.Label
+        doc.recompute()
 
         names_str = ", ".join(f"{n}={variables[n]}" for n in var_names)
-        usage = ", ".join(f'"{obj_label}.{n}"' for n in var_names[:3])
+        usage = ", ".join(f'"{vs.Label}.{n}"' for n in var_names[:3])
         if len(var_names) > 3:
             usage += ", ..."
 
         return ToolResult(
             success=True,
-            output=(f"Created {backend} '{obj_name}' with {len(var_names)} variables: "
+            output=(f"Created VarSet '{vs.Name}' with {len(var_names)} variables: "
                     f"{names_str}. "
                     f"Reference in expressions as {usage}. "
                     f"Pass these as width/height/length values in create_sketch and pad_sketch."),
-            data={"name": obj_name, "label": obj_label,
-                  "variables": dict(variables), "backend": backend},
+            data={"name": vs.Name, "label": vs.Label,
+                  "variables": dict(variables)},
         )
 
     return _with_undo("Create Variable Set", do)
@@ -2020,11 +1989,83 @@ def _handle_create_variable_set(
 CREATE_VARIABLE_SET = ToolDefinition(
     name="create_variable_set",
     description=(
-        "Create named variables for parametric modeling. "
+        "Create a VarSet (App::VarSet) with named, typed variables for parametric modeling. "
+        "Variables appear as editable properties in the Data panel. "
         "After creation, pass variable references as dimension values in create_sketch "
         "(e.g. width='Variables.length') and pad_sketch (e.g. length='Variables.height'). "
-        "The user can then modify dimensions by editing the variable set. "
-        "Example: create_variable_set(variables={\"length\": 50, \"width\": 30, \"height\": 20})"
+        "Example: create_variable_set(variables={\"length\": 50, \"width\": 30, \"height\": 20}). "
+        "Alternative: use create_spreadsheet for a spreadsheet-based approach."
+    ),
+    category="modeling",
+    parameters=[
+        ToolParam("variables", "object",
+                  "Dict of variable names and values, e.g. {\"length\": 50, \"wall\": 2}"),
+        ToolParam("label", "string", "Display label for the variable set",
+                  required=False, default="Variables"),
+    ],
+    handler=_handle_create_variable_set,
+)
+
+
+# ── create_spreadsheet ────────────────────────────────────
+
+def _handle_create_spreadsheet(
+    variables: dict | None = None,
+    label: str = "Variables",
+) -> ToolResult:
+    """Create a Spreadsheet with named cells for parametric modeling."""
+
+    def do(doc):
+        if not variables:
+            return ToolResult(success=False, output="",
+                              error="No variables provided. Pass a dict like "
+                                    "{\"length\": 50, \"width\": 30}.")
+
+        sheet = doc.addObject("Spreadsheet::Sheet", label)
+        var_names = []
+        for i, (name, value) in enumerate(variables.items()):
+            row = i + 1
+            cell = f"A{row}"
+            sheet.set(f"B{row}", str(name))
+            sheet.set(cell, str(value))
+            try:
+                sheet.setAlias(cell, name)
+            except Exception as e:
+                return ToolResult(
+                    success=False, output="",
+                    error=f"Invalid variable name '{name}': {e}. "
+                          "Avoid names that look like cell addresses (e.g. A1, B2).")
+            var_names.append(name)
+
+        doc.recompute()
+
+        names_str = ", ".join(f"{n}={variables[n]}" for n in var_names)
+        usage = ", ".join(f'"{sheet.Label}.{n}"' for n in var_names[:3])
+        if len(var_names) > 3:
+            usage += ", ..."
+
+        return ToolResult(
+            success=True,
+            output=(f"Created Spreadsheet '{sheet.Name}' with {len(var_names)} variables: "
+                    f"{names_str}. "
+                    f"Reference in expressions as {usage}. "
+                    f"Pass these as width/height/length values in create_sketch and pad_sketch."),
+            data={"name": sheet.Name, "label": sheet.Label,
+                  "variables": dict(variables)},
+        )
+
+    return _with_undo("Create Spreadsheet", do)
+
+
+CREATE_SPREADSHEET = ToolDefinition(
+    name="create_spreadsheet",
+    description=(
+        "Create a Spreadsheet with named variables (cell aliases) for parametric modeling. "
+        "Variables are stored as named cells that can be edited in the Spreadsheet workbench. "
+        "After creation, pass variable references as dimension values in create_sketch "
+        "(e.g. width='Variables.length') and pad_sketch (e.g. length='Variables.height'). "
+        "Supports formulas in cells (e.g. '=A1*2'). "
+        "Alternative: use create_variable_set for a cleaner property-based approach."
     ),
     category="modeling",
     parameters=[
@@ -2033,7 +2074,7 @@ CREATE_VARIABLE_SET = ToolDefinition(
         ToolParam("label", "string", "Display label for the spreadsheet",
                   required=False, default="Variables"),
     ],
-    handler=_handle_create_variable_set,
+    handler=_handle_create_spreadsheet,
 )
 
 
@@ -4382,6 +4423,7 @@ ALL_TOOLS = [
     SWITCH_DOCUMENT,
     GET_DOCUMENT_STATE,
     CREATE_VARIABLE_SET,
+    CREATE_SPREADSHEET,
     SET_EXPRESSION,
     MODIFY_PROPERTY,
     EXPORT_MODEL,
