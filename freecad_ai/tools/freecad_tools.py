@@ -1961,10 +1961,14 @@ def _handle_set_expression(
             return ToolResult(success=False, output="",
                               error=f"Object '{object_name}' not found.{hint}")
 
-        if not hasattr(obj, property_name):
+        # Validate property exists — skip check for indexed/nested properties
+        # like "Constraints[8]" or "Placement.Base.x" since hasattr doesn't
+        # handle those.
+        base_prop = property_name.split("[")[0].split(".")[0]
+        if not hasattr(obj, base_prop):
             return ToolResult(
                 success=False, output="",
-                error=f"Object '{object_name}' has no property '{property_name}'")
+                error=f"Object '{object_name}' has no property '{base_prop}'")
 
         # Clearing an expression
         if not expression or expression.strip() == "":
@@ -2009,9 +2013,10 @@ SET_EXPRESSION = ToolDefinition(
     name="set_expression",
     description=(
         "Bind an object property to an expression for parametric relationships. "
-        "Use with create_variable_set to make models parametric: "
-        "set_expression('Pad', 'Length', 'Variables.height'). "
-        "Also supports formulas: 'Variables.length * 2', 'Variables.wall + 1'. "
+        "Use with create_variable_set to make models parametric. "
+        "Examples: set_expression('Pad', 'Length', 'Variables.height') for pad length, "
+        "set_expression('Sketch', 'Constraints[0]', 'Variables.width') for sketch constraints. "
+        "Also supports formulas: 'Variables.length * 2'. "
         "Pass empty expression to clear the binding."
     ),
     category="modeling",
