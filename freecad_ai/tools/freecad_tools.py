@@ -403,14 +403,27 @@ def _handle_create_sketch(
                 except Exception:
                     pass  # Skip invalid constraints
 
-        # Report constraint status so the LLM can self-correct
+        # Report constraint status and details so the LLM can self-correct
+        # and knows which indices to bind with set_expression
         constraint_count = sketch.ConstraintCount
         constraint_status = ""
+        constraint_details = []
+        try:
+            for ci in range(constraint_count):
+                c = sketch.Constraints[ci]
+                detail = f"Constraints[{ci}]: {c.Type}"
+                if hasattr(c, "Value") and c.Type in (
+                    "Distance", "DistanceX", "DistanceY", "Radius", "Angle",
+                ):
+                    detail += f" = {c.Value}"
+                constraint_details.append(detail)
+        except Exception:
+            pass
+
         try:
             if sketch.FullyConstrained:
                 constraint_status = " Fully constrained."
             else:
-                # solve() returns 0 if solved, positive = under-constrained DOF
                 dof = sketch.solve()
                 if dof > 0:
                     constraint_status = (
@@ -424,15 +437,23 @@ def _handle_create_sketch(
                 else:
                     constraint_status = " Fully constrained."
         except Exception:
-            pass  # solve() not available in all versions
+            pass
+
+        constraint_info = ""
+        if constraint_details:
+            constraint_info = "\n" + "\n".join(constraint_details)
 
         return ToolResult(
             success=True,
             output=(f"Created sketch '{sketch.Name}' with {geo_count} geometries"
                     f" and {constraint_count} constraints.{constraint_status}"
-                    f" Use sketch_name='{sketch.Name}' in pad_sketch/pocket_sketch."),
+                    f"{constraint_info}"
+                    f"\nUse sketch_name='{sketch.Name}' in pad_sketch/pocket_sketch."
+                    f" Use set_expression('{sketch.Name}', 'Constraints[N]', 'expr')"
+                    f" to bind dimensions to variables."),
             data={"name": sketch.Name, "label": sketch.Label,
                   "geometry_count": geo_count, "constraint_count": constraint_count,
+                  "constraints": constraint_details,
                   "fully_constrained": getattr(sketch, "FullyConstrained", None)},
         )
 
