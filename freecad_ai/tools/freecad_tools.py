@@ -966,7 +966,7 @@ def _handle_fillet_edges(
             hint = _suggest_similar(doc, object_name)
             return ToolResult(success=False, output="", error=f"Object '{object_name}' not found.{hint}")
 
-        edge_refs = _coerce_str_list(edges) or ["Edge1"]
+        raw_refs = _coerce_str_list(edges) or ["Edge1"]
 
         # Check if this is a PartDesign body/feature
         # If obj IS a Body, use its Tip (last feature) as the fillet base
@@ -980,6 +980,12 @@ def _handle_fillet_edges(
                                   error=f"Body '{obj.Label}' has no features to fillet.")
         else:
             body = _find_body_for(doc, obj)
+
+        # Resolve filter keywords (all, vertical, top, etc.) into edge names
+        edge_refs = _resolve_edge_refs(obj.Shape, raw_refs)
+        if not edge_refs:
+            return ToolResult(success=False, output="",
+                              error=f"No edges match filter {raw_refs} on '{obj.Label}'.")
 
         if body:
             fillet = body.newObject("PartDesign::Fillet", label or "Fillet")
@@ -995,7 +1001,8 @@ def _handle_fillet_edges(
         return ToolResult(
             success=True,
             output=f"Applied fillet (r={radius}mm) to {len(edge_refs)} edge(s) of '{obj.Label}'",
-            data={"name": fillet.Name, "label": fillet.Label, "radius": radius},
+            data={"name": fillet.Name, "label": fillet.Label, "radius": radius,
+                  "edges": edge_refs},
         )
 
     return _with_undo("Fillet Edges", do)
@@ -1003,12 +1010,18 @@ def _handle_fillet_edges(
 
 FILLET_EDGES = ToolDefinition(
     name="fillet_edges",
-    description="Apply a fillet (rounded edge) to one or more edges of an object.",
+    description=(
+        "Apply a fillet (rounded edge) to one or more edges of an object. "
+        "Edges can be explicit names (Edge1, Edge4) or filter keywords: "
+        "'all', 'vertical', 'horizontal', 'top', 'bottom', 'front', 'back', "
+        "'left', 'right', 'circular'. Filters can be combined: ['top', 'vertical']."
+    ),
     category="modeling",
     parameters=[
         ToolParam("object_name", "string", "Internal name of the object"),
-        ToolParam("edges", "array", "Edge references, e.g. ['Edge1', 'Edge4']", required=False,
-                  items={"type": "string"}),
+        ToolParam("edges", "array",
+                  "Edge references or filter keywords, e.g. ['all'], ['vertical'], ['Edge1', 'Edge4']",
+                  required=False, items={"type": "string"}),
         ToolParam("radius", "number", "Fillet radius in mm", required=False, default=1.0),
         ToolParam("label", "string", "Display label for the fillet", required=False, default=""),
     ],
@@ -1032,7 +1045,7 @@ def _handle_chamfer_edges(
             hint = _suggest_similar(doc, object_name)
             return ToolResult(success=False, output="", error=f"Object '{object_name}' not found.{hint}")
 
-        edge_refs = _coerce_str_list(edges) or ["Edge1"]
+        raw_refs = _coerce_str_list(edges) or ["Edge1"]
 
         # If obj IS a Body, use its Tip (last feature) as the chamfer base
         body = None
@@ -1045,6 +1058,12 @@ def _handle_chamfer_edges(
                                   error=f"Body '{obj.Label}' has no features to chamfer.")
         else:
             body = _find_body_for(doc, obj)
+
+        # Resolve filter keywords
+        edge_refs = _resolve_edge_refs(obj.Shape, raw_refs)
+        if not edge_refs:
+            return ToolResult(success=False, output="",
+                              error=f"No edges match filter {raw_refs} on '{obj.Label}'.")
 
         if body:
             chamfer = body.newObject("PartDesign::Chamfer", label or "Chamfer")
@@ -1060,7 +1079,8 @@ def _handle_chamfer_edges(
         return ToolResult(
             success=True,
             output=f"Applied chamfer (size={size}mm) to {len(edge_refs)} edge(s) of '{obj.Label}'",
-            data={"name": chamfer.Name, "label": chamfer.Label, "size": size},
+            data={"name": chamfer.Name, "label": chamfer.Label, "size": size,
+                  "edges": edge_refs},
         )
 
     return _with_undo("Chamfer Edges", do)
@@ -1068,12 +1088,18 @@ def _handle_chamfer_edges(
 
 CHAMFER_EDGES = ToolDefinition(
     name="chamfer_edges",
-    description="Apply a chamfer (angled edge cut) to one or more edges of an object.",
+    description=(
+        "Apply a chamfer (angled edge cut) to one or more edges of an object. "
+        "Edges can be explicit names (Edge1, Edge4) or filter keywords: "
+        "'all', 'vertical', 'horizontal', 'top', 'bottom', 'front', 'back', "
+        "'left', 'right', 'circular'. Filters can be combined: ['top', 'vertical']."
+    ),
     category="modeling",
     parameters=[
         ToolParam("object_name", "string", "Internal name of the object"),
-        ToolParam("edges", "array", "Edge references, e.g. ['Edge1', 'Edge4']", required=False,
-                  items={"type": "string"}),
+        ToolParam("edges", "array",
+                  "Edge references or filter keywords, e.g. ['all'], ['vertical'], ['Edge1', 'Edge4']",
+                  required=False, items={"type": "string"}),
         ToolParam("size", "number", "Chamfer size in mm", required=False, default=1.0),
         ToolParam("label", "string", "Display label for the chamfer", required=False, default=""),
     ],
@@ -1352,8 +1378,8 @@ def _classify_face(face, bbox) -> str:
         return surface_type.lower()
 
 
-def _handle_list_faces(object_name: str) -> ToolResult:
-    """List all faces of an object with names, labels, normals, and positions."""
+def _handle_list_faces(object_name: str, filter: str = "") -> ToolResult:
+    """List faces of an object, optionally filtered by keyword."""
     import FreeCAD as App
 
     doc = App.ActiveDocument
@@ -1375,7 +1401,9 @@ def _handle_list_faces(object_name: str) -> ToolResult:
                           error=f"Object '{object_name}' has no faces")
 
     bbox = shape.BoundBox
-    lines = [f"## Faces of '{obj.Label}' ({len(shape.Faces)} faces)"]
+    filter_lower = filter.strip().lower() if filter else ""
+
+    lines = []
     face_data = []
 
     for i, face in enumerate(shape.Faces):
@@ -1383,6 +1411,10 @@ def _handle_list_faces(object_name: str) -> ToolResult:
         center = face.CenterOfMass
         area = face.Area
         label = _classify_face(face, bbox)
+
+        # Apply filter if specified
+        if filter_lower and filter_lower not in label.lower():
+            continue
 
         surface_type = face.Surface.__class__.__name__
 
@@ -1405,21 +1437,32 @@ def _handle_list_faces(object_name: str) -> ToolResult:
             "area": round(area, 2),
         })
 
-    output = "\n".join(lines)
+    total = len(shape.Faces)
+    shown = len(face_data)
+    if filter_lower:
+        header = f"## Faces of '{obj.Label}' matching '{filter}' ({shown}/{total} faces)"
+    else:
+        header = f"## Faces of '{obj.Label}' ({total} faces)"
+
+    output = "\n".join([header] + lines)
     return ToolResult(success=True, output=output, data={"faces": face_data})
 
 
 LIST_FACES = ToolDefinition(
     name="list_faces",
     description=(
-        "List all faces of an object with reference names (Face1, Face2, ...), "
+        "List faces of an object with reference names (Face1, Face2, ...), "
         "human-readable labels (top, bottom, front, back, left, right, cylindrical), "
         "center positions, normals, and areas. Use this to identify which face to "
-        "reference in shell_object, assembly constraints, or other face-based operations."
+        "reference in shell_object, assembly constraints, or other face-based operations. "
+        "Optional filter to show only matching faces (e.g. 'top', 'cylindrical')."
     ),
     category="query",
     parameters=[
         ToolParam("object_name", "string", "Internal name or label of the object"),
+        ToolParam("filter", "string",
+                  "Filter keyword to show only matching faces (e.g. 'top', 'cylindrical', 'side')",
+                  required=False, default=""),
     ],
     handler=_handle_list_faces,
 )
@@ -1497,8 +1540,109 @@ def _classify_edge(edge, bbox) -> str:
     return f"{position} {direction}"
 
 
-def _handle_list_edges(object_name: str) -> ToolResult:
-    """List all edges of an object with names, labels, positions, and lengths."""
+# ── Edge / face filter keywords ────────────────────────────
+#
+# Filter keywords that can be used instead of (or mixed with) explicit
+# Edge/Face references in fillet_edges, chamfer_edges, shell_object, etc.
+#
+# Edge keywords: "all", "vertical", "horizontal", "top", "bottom",
+#                "front", "back", "left", "right", "circular"
+# Face keywords: "all", "top", "bottom", "front", "back", "left",
+#                "right", "cylindrical", "spherical"
+
+_EDGE_FILTER_KEYWORDS = {
+    "all", "vertical", "horizontal", "top", "bottom",
+    "front", "back", "left", "right", "circular",
+}
+
+_FACE_FILTER_KEYWORDS = {
+    "all", "top", "bottom", "front", "back", "left", "right",
+    "cylindrical", "spherical", "side",
+}
+
+
+def _resolve_edge_refs(shape, edge_input: list[str]) -> list[str]:
+    """Resolve a mix of explicit edge names and filter keywords into edge names.
+
+    Args:
+        shape: FreeCAD Shape with .Edges and .BoundBox.
+        edge_input: List of strings — Edge references ("Edge1") and/or
+            filter keywords ("all", "vertical", "top", etc.).
+
+    Returns:
+        Sorted, deduplicated list of edge reference strings.
+    """
+    bbox = shape.BoundBox
+    result = set()
+
+    # Check if any element is a filter keyword
+    has_filters = any(e.lower() in _EDGE_FILTER_KEYWORDS for e in edge_input)
+
+    if not has_filters:
+        # All explicit — return as-is
+        return list(edge_input)
+
+    for token in edge_input:
+        token_lower = token.lower()
+        if token_lower not in _EDGE_FILTER_KEYWORDS:
+            # Explicit edge name — keep it
+            result.add(token)
+            continue
+
+        if token_lower == "all":
+            return [f"Edge{i + 1}" for i in range(len(shape.Edges))]
+
+        # Filter by classification label
+        for i, edge in enumerate(shape.Edges):
+            label = _classify_edge(edge, bbox).lower()
+            if token_lower == "circular":
+                if "circular" in label:
+                    result.add(f"Edge{i + 1}")
+            elif token_lower in label:
+                result.add(f"Edge{i + 1}")
+
+    # Sort numerically: Edge1, Edge2, ..., Edge12
+    return sorted(result, key=lambda e: int(e.replace("Edge", "")))
+
+
+def _resolve_face_refs(shape, face_input: list[str]) -> list[str]:
+    """Resolve a mix of explicit face names and filter keywords into face names.
+
+    Args:
+        shape: FreeCAD Shape with .Faces and .BoundBox.
+        face_input: List of strings — Face references ("Face1") and/or
+            filter keywords ("all", "top", "bottom", etc.).
+
+    Returns:
+        Sorted, deduplicated list of face reference strings.
+    """
+    bbox = shape.BoundBox
+    result = set()
+
+    has_filters = any(f.lower() in _FACE_FILTER_KEYWORDS for f in face_input)
+
+    if not has_filters:
+        return list(face_input)
+
+    for token in face_input:
+        token_lower = token.lower()
+        if token_lower not in _FACE_FILTER_KEYWORDS:
+            result.add(token)
+            continue
+
+        if token_lower == "all":
+            return [f"Face{i + 1}" for i in range(len(shape.Faces))]
+
+        for i, face in enumerate(shape.Faces):
+            label = _classify_face(face, bbox).lower()
+            if token_lower in label:
+                result.add(f"Face{i + 1}")
+
+    return sorted(result, key=lambda f: int(f.replace("Face", "")))
+
+
+def _handle_list_edges(object_name: str, filter: str = "") -> ToolResult:
+    """List edges of an object, optionally filtered by keyword."""
     import FreeCAD as App
 
     doc = App.ActiveDocument
@@ -1520,7 +1664,9 @@ def _handle_list_edges(object_name: str) -> ToolResult:
                           error=f"Object '{object_name}' has no edges")
 
     bbox = shape.BoundBox
-    lines = [f"## Edges of '{obj.Label}' ({len(shape.Edges)} edges)"]
+    filter_lower = filter.strip().lower() if filter else ""
+
+    lines = []
     edge_data = []
 
     for i, edge in enumerate(shape.Edges):
@@ -1528,6 +1674,10 @@ def _handle_list_edges(object_name: str) -> ToolResult:
         mid = edge.CenterOfMass
         length = edge.Length
         label = _classify_edge(edge, bbox)
+
+        # Apply filter if specified
+        if filter_lower and filter_lower not in label.lower():
+            continue
 
         lines.append(
             f"- **{name}** \"{label}\" — midpoint=({mid.x:.1f}, {mid.y:.1f}, {mid.z:.1f}), "
@@ -1541,21 +1691,32 @@ def _handle_list_edges(object_name: str) -> ToolResult:
             "length": round(length, 2),
         })
 
-    output = "\n".join(lines)
+    total = len(shape.Edges)
+    shown = len(edge_data)
+    if filter_lower:
+        header = f"## Edges of '{obj.Label}' matching '{filter}' ({shown}/{total} edges)"
+    else:
+        header = f"## Edges of '{obj.Label}' ({total} edges)"
+
+    output = "\n".join([header] + lines)
     return ToolResult(success=True, output=output, data={"edges": edge_data})
 
 
 LIST_EDGES = ToolDefinition(
     name="list_edges",
     description=(
-        "List all edges of an object with reference names (Edge1, Edge2, ...), "
+        "List edges of an object with reference names (Edge1, Edge2, ...), "
         "human-readable labels (top-front horizontal, front-left vertical, circular, etc.), "
-        "midpoint positions, and lengths. Use this to identify which edge to "
-        "reference in fillet_edges, chamfer_edges, or other edge-based operations."
+        "midpoint positions, and lengths. Use this to identify which edges to "
+        "reference in fillet_edges, chamfer_edges, or other edge-based operations. "
+        "Optional filter to show only matching edges (e.g. 'vertical', 'top', 'circular')."
     ),
     category="query",
     parameters=[
         ToolParam("object_name", "string", "Internal name or label of the object"),
+        ToolParam("filter", "string",
+                  "Filter keyword to show only matching edges (e.g. 'vertical', 'top', 'circular')",
+                  required=False, default=""),
     ],
     handler=_handle_list_edges,
 )
@@ -2688,7 +2849,7 @@ def _handle_shell_object(
         if not obj:
             return ToolResult(success=False, output="", error=f"Object '{object_name}' not found")
 
-        face_refs = _coerce_str_list(faces) or ["Face1"]
+        raw_refs = _coerce_str_list(faces) or ["Face1"]
         join_map = {"Arc": 0, "Intersection": 1}
 
         # If obj IS a Body, use its Tip (last feature) as the shell base
@@ -2702,6 +2863,12 @@ def _handle_shell_object(
                                   error=f"Body '{obj.Label}' has no features to shell.")
         else:
             body = _find_body_for(doc, obj)
+
+        # Resolve filter keywords
+        face_refs = _resolve_face_refs(obj.Shape, raw_refs)
+        if not face_refs:
+            return ToolResult(success=False, output="",
+                              error=f"No faces match filter {raw_refs} on '{obj.Label}'.")
 
         if body:
             shell = body.newObject("PartDesign::Thickness", label or "Shell")
@@ -2728,12 +2895,17 @@ def _handle_shell_object(
 
 SHELL_OBJECT = ToolDefinition(
     name="shell_object",
-    description="Hollow out a solid by removing selected faces and applying a wall thickness (PartDesign::Thickness).",
+    description=(
+        "Hollow out a solid by removing selected faces and applying a wall thickness "
+        "(PartDesign::Thickness). Faces can be explicit names (Face1, Face6) or filter "
+        "keywords: 'top', 'bottom', 'front', 'back', 'left', 'right', 'cylindrical'."
+    ),
     category="modeling",
     parameters=[
         ToolParam("object_name", "string", "Internal name of the solid object to shell"),
-        ToolParam("faces", "array", "Face references to remove, e.g. ['Face1', 'Face6']", required=False,
-                  items={"type": "string"}),
+        ToolParam("faces", "array",
+                  "Face references or filter keywords, e.g. ['top'], ['Face1', 'Face6']",
+                  required=False, items={"type": "string"}),
         ToolParam("thickness", "number", "Wall thickness in mm", required=False, default=1.0),
         ToolParam("join", "string", "Join type for corners", required=False, default="Arc",
                   enum=["Arc", "Intersection"]),
