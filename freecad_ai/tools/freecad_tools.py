@@ -403,10 +403,7 @@ def _handle_create_sketch(
                 except Exception:
                     pass  # Skip invalid constraints
 
-        # Report constraint status and DIMENSION constraints only
-        # (the ones the LLM needs for expression binding).
-        # Structural constraints (Coincident, Horizontal, Vertical, etc.)
-        # are not useful for binding.
+        # Report all constraints — dimension ones marked as bindable
         constraint_count = sketch.ConstraintCount
         constraint_status = ""
         _DIMENSION_TYPES = {
@@ -418,7 +415,11 @@ def _handle_create_sketch(
                 c = sketch.Constraints[ci]
                 if c.Type in _DIMENSION_TYPES:
                     constraint_details.append(
-                        f"Constraints[{ci}]: {c.Type} = {c.Value}"
+                        f"Constraints[{ci}]: {c.Type} = {c.Value}  ← bindable"
+                    )
+                else:
+                    constraint_details.append(
+                        f"Constraints[{ci}]: {c.Type}"
                     )
         except Exception:
             pass
@@ -445,7 +446,7 @@ def _handle_create_sketch(
         constraint_info = ""
         if constraint_details:
             constraint_info = (
-                "\nDimension constraints (bind these with set_expression):\n"
+                "\nConstraints:\n"
                 + "\n".join(f"  {d}" for d in constraint_details)
             )
 
