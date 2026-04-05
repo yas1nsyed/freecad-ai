@@ -343,9 +343,19 @@ def _handle_create_sketch(
                 elif geo_type == "rectangle":
                     # Accept both (x1,y1,x2,y2) and (x,y,width,height) formats
                     # Also accept "length" as alias for "height" (LLMs often confuse these)
+                    # Dimensions can be numbers or expression strings (e.g. "Variables.length")
                     rect_w = geo.get("width", None)
                     rect_h = geo.get("height", None) or geo.get("length", None)
+                    w_expr = None
+                    h_expr = None
                     if rect_w is not None and rect_h is not None:
+                        # If dimensions are expression strings, use a placeholder
+                        if isinstance(rect_w, str):
+                            w_expr = rect_w
+                            rect_w = 10  # placeholder, expression overrides
+                        if isinstance(rect_h, str):
+                            h_expr = rect_h
+                            rect_h = 10
                         x1 = geo.get("x", 0)
                         y1 = geo.get("y", 0)
                         x2 = x1 + rect_w
@@ -367,6 +377,17 @@ def _handle_create_sketch(
                     sketch.addConstraint(Sketcher.Constraint("Horizontal", g+2))
                     sketch.addConstraint(Sketcher.Constraint("Vertical", g+1))
                     sketch.addConstraint(Sketcher.Constraint("Vertical", g+3))
+                    # Add dimension constraints (width = DistanceX, height = DistanceY)
+                    # These make the rectangle fully constrained and bindable
+                    w_ci = sketch.addConstraint(
+                        Sketcher.Constraint("DistanceX", g, 1, g, 2, rect_w))
+                    h_ci = sketch.addConstraint(
+                        Sketcher.Constraint("DistanceY", g+1, 1, g+1, 2, rect_h))
+                    # Bind to expressions if provided
+                    if w_expr:
+                        sketch.setExpression(f"Constraints[{w_ci}]", w_expr)
+                    if h_expr:
+                        sketch.setExpression(f"Constraints[{h_ci}]", h_expr)
                     geo_count += 4
 
         if constraints:
@@ -467,7 +488,12 @@ def _handle_create_sketch(
 
 CREATE_SKETCH = ToolDefinition(
     name="create_sketch",
-    description="Create a 2D sketch with geometry (lines, circles, arcs, rectangles) and constraints. For PartDesign, specify body_name to add the sketch to a body.",
+    description=(
+        "Create a 2D sketch with geometry (lines, circles, arcs, rectangles) and constraints. "
+        "For PartDesign, specify body_name to add the sketch to a body. "
+        "Rectangle dimensions can be expression strings for parametric models: "
+        "width='Variables.length', height='Variables.width'."
+    ),
     category="modeling",
     parameters=[
         ToolParam("plane", "string", "Attachment plane: XY, XZ, or YZ", required=False, default="XY",
@@ -495,7 +521,7 @@ CREATE_SKETCH = ToolDefinition(
 
 def _handle_pad_sketch(
     sketch_name: str,
-    length: float = 10.0,
+    length: float | str = 10.0,
     symmetric: bool = False,
     label: str = "",
     body_name: str = "",
@@ -522,7 +548,15 @@ def _handle_pad_sketch(
 
         pad = body.newObject("PartDesign::Pad", label or "Pad")
         pad.Profile = sketch
-        pad.Length = length
+        # Length can be a number or an expression string (e.g. "Variables.height")
+        length_expr = None
+        if isinstance(length, str):
+            length_expr = length
+            pad.Length = 10  # placeholder
+        else:
+            pad.Length = length
+        if length_expr:
+            pad.setExpression("Length", length_expr)
         if symmetric:
             pad.Midplane = True
         sketch.Visibility = False
@@ -538,11 +572,15 @@ def _handle_pad_sketch(
 
 PAD_SKETCH = ToolDefinition(
     name="pad_sketch",
-    description="Pad (extrude) a sketch to create a solid. The sketch must be inside a PartDesign Body.",
+    description=(
+        "Pad (extrude) a sketch to create a solid. The sketch must be inside a PartDesign Body. "
+        "Length can be an expression string for parametric models: length='Variables.height'."
+    ),
     category="modeling",
     parameters=[
         ToolParam("sketch_name", "string", "Internal name of the sketch to pad"),
-        ToolParam("length", "number", "Extrusion length in mm", required=False, default=10.0),
+        ToolParam("length", "string", "Extrusion length in mm, or expression string (e.g. 'Variables.height')",
+                  required=False, default=10.0),
         ToolParam("symmetric", "boolean", "Pad symmetrically in both directions", required=False, default=False),
         ToolParam("label", "string", "Display label for the pad feature", required=False, default=""),
         ToolParam("body_name", "string", "Explicit body name (use when multiple bodies exist)", required=False, default=""),
