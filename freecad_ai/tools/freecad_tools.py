@@ -1868,6 +1868,165 @@ GET_DOCUMENT_STATE = ToolDefinition(
 )
 
 
+# ── create_variable_set ────────────────────────────────────
+
+def _handle_create_variable_set(
+    variables: dict | None = None,
+    label: str = "Variables",
+) -> ToolResult:
+    """Create a spreadsheet with named variables for parametric modeling."""
+
+    def do(doc):
+        if not variables:
+            return ToolResult(success=False, output="",
+                              error="No variables provided. Pass a dict like "
+                                    "{\"length\": 50, \"width\": 30}.")
+
+        sheet = doc.addObject("Spreadsheet::Sheet", label)
+
+        # Populate cells: A1, A2, A3, ... with values and aliases
+        var_names = []
+        for i, (name, value) in enumerate(variables.items()):
+            row = i + 1
+            cell = f"A{row}"
+            # Set label in column B for readability
+            sheet.set(f"B{row}", str(name))
+            # Set value in column A
+            if isinstance(value, (int, float)):
+                sheet.set(cell, str(value))
+            else:
+                sheet.set(cell, str(value))
+            # Create alias — this is the name used in expressions
+            try:
+                sheet.setAlias(cell, name)
+            except Exception as e:
+                return ToolResult(
+                    success=False, output="",
+                    error=f"Invalid variable name '{name}': {e}. "
+                          "Avoid names that look like cell addresses (e.g. A1, B2)."
+                )
+            var_names.append(name)
+
+        doc.recompute()
+
+        names_str = ", ".join(f"{n}={variables[n]}" for n in var_names)
+        usage = ", ".join(f'"{label}.{n}"' for n in var_names[:3])
+        if len(var_names) > 3:
+            usage += ", ..."
+
+        return ToolResult(
+            success=True,
+            output=(f"Created variable set '{sheet.Name}' with {len(var_names)} variables: "
+                    f"{names_str}. "
+                    f"Use set_expression to bind properties, e.g. {usage}"),
+            data={"name": sheet.Name, "label": sheet.Label,
+                  "variables": dict(variables)},
+        )
+
+    return _with_undo("Create Variable Set", do)
+
+
+CREATE_VARIABLE_SET = ToolDefinition(
+    name="create_variable_set",
+    description=(
+        "Create a spreadsheet with named variables for parametric modeling. "
+        "After creation, use set_expression to bind object properties to these "
+        "variables. The user can then modify dimensions by editing the spreadsheet. "
+        "Example: create_variable_set(variables={\"length\": 50, \"width\": 30, \"height\": 20})"
+    ),
+    category="modeling",
+    parameters=[
+        ToolParam("variables", "object",
+                  "Dict of variable names and values, e.g. {\"length\": 50, \"wall\": 2}"),
+        ToolParam("label", "string", "Display label for the spreadsheet",
+                  required=False, default="Variables"),
+    ],
+    handler=_handle_create_variable_set,
+)
+
+
+# ── set_expression ─────────────────────────────────────────
+
+def _handle_set_expression(
+    object_name: str,
+    property_name: str,
+    expression: str,
+) -> ToolResult:
+    """Bind an object property to an expression."""
+
+    def do(doc):
+        obj = _get_object(doc, object_name)
+        if not obj:
+            hint = _suggest_similar(doc, object_name)
+            return ToolResult(success=False, output="",
+                              error=f"Object '{object_name}' not found.{hint}")
+
+        if not hasattr(obj, property_name):
+            return ToolResult(
+                success=False, output="",
+                error=f"Object '{object_name}' has no property '{property_name}'")
+
+        # Clearing an expression
+        if not expression or expression.strip() == "":
+            obj.setExpression(property_name, None)
+            doc.recompute()
+            return ToolResult(
+                success=True,
+                output=f"Cleared expression on {object_name}.{property_name}",
+                data={"name": object_name, "property": property_name},
+            )
+
+        # Validate expression before applying
+        try:
+            err = obj.setExpression(property_name, expression)
+        except Exception as e:
+            return ToolResult(
+                success=False, output="",
+                error=f"Invalid expression '{expression}' for "
+                      f"{object_name}.{property_name}: {e}")
+
+        doc.recompute()
+
+        # Read back the computed value
+        try:
+            computed = getattr(obj, property_name)
+            value_str = f" = {computed}"
+        except Exception:
+            value_str = ""
+
+        return ToolResult(
+            success=True,
+            output=(f"Bound {object_name}.{property_name} to expression "
+                    f"'{expression}'{value_str}"),
+            data={"name": object_name, "property": property_name,
+                  "expression": expression},
+        )
+
+    return _with_undo("Set Expression", do)
+
+
+SET_EXPRESSION = ToolDefinition(
+    name="set_expression",
+    description=(
+        "Bind an object property to an expression for parametric relationships. "
+        "Use with create_variable_set to make models parametric: "
+        "set_expression('Pad', 'Length', 'Variables.height'). "
+        "Also supports formulas: 'Variables.length * 2', 'Variables.wall + 1'. "
+        "Pass empty expression to clear the binding."
+    ),
+    category="modeling",
+    parameters=[
+        ToolParam("object_name", "string", "Internal name of the object"),
+        ToolParam("property_name", "string",
+                  "Property to bind (e.g. Length, Width, Height, Radius)"),
+        ToolParam("expression", "string",
+                  "Expression string (e.g. 'Variables.length', 'Variables.wall * 2'). "
+                  "Empty string clears the expression."),
+    ],
+    handler=_handle_set_expression,
+)
+
+
 # ── modify_property ─────────────────────────────────────────
 
 def _resolve_relative_value(current, expr: str):
@@ -4125,6 +4284,8 @@ ALL_TOOLS = [
     LIST_DOCUMENTS,
     SWITCH_DOCUMENT,
     GET_DOCUMENT_STATE,
+    CREATE_VARIABLE_SET,
+    SET_EXPRESSION,
     MODIFY_PROPERTY,
     EXPORT_MODEL,
     EXECUTE_CODE,
