@@ -8,7 +8,7 @@ An AI-powered assistant workbench for FreeCAD that generates and executes Python
 
 - **Chat interface** — dock widget with streaming LLM responses
 - **Plan / Act modes** — review code before execution (Plan) or auto-execute (Act)
-- **Tool calling** — 42 structured FreeCAD operations (Act mode) for safer, more reliable modeling
+- **Tool calling** — 48 structured FreeCAD operations (Act mode) for safer, more reliable modeling
 - **Skills** — reusable instruction sets the model invokes autonomously or via `/command` (enclosure, gear, fastener holes, etc.)
 - **Skill optimizer** — automatically improve skill instructions via iterative test-evaluate-modify loop (`/optimize-skill`)
 - **Hooks** — user-defined Python hooks for lifecycle events (block tools, modify input, log activity)
@@ -150,10 +150,15 @@ Tool calling is enabled by default. Disable it by setting `enable_tools: false` 
 | `create_enclosure_lid` | Generate a snap-fit enclosure lid with correct dimensions |
 | `measure` | Volume, area, bounding box, distance, edge listing |
 | `describe_model` | Comprehensive geometry summary: dimensions, wall thickness, hollow/solid detection |
-| `list_faces` | List all faces with names, labels (top, bottom, front, etc.), normals, and areas |
-| `list_edges` | List all edges with names, labels (top-front horizontal, etc.), and lengths |
+| `list_faces` | List all faces with names, labels, normals, areas (optional filter) |
+| `list_edges` | List all edges with names, labels, lengths (optional filter) |
+| `list_documents` | List all open documents with object counts and active indicator |
+| `switch_document` | Switch the active FreeCAD document by name or label |
 | `get_document_state` | Inspect current objects and properties |
-| `modify_property` | Change any object property |
+| `create_variable_set` | Create a VarSet with named variables for parametric modeling |
+| `create_spreadsheet` | Create a Spreadsheet with named variables for parametric modeling |
+| `set_expression` | Bind object properties to expressions (parametric relationships) |
+| `modify_property` | Change any object property (supports relative: +10%, *1.5) |
 | `export_model` | Export to STL, STEP, or IGES |
 | `execute_code` | Fallback: run arbitrary Python |
 | `undo` | Undo last N operations, or undo until a named transaction |

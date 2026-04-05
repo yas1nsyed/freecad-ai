@@ -7,6 +7,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.8.0-alpha] - 2026-04-05
+
+Parametric modeling, per-model parameters, batch operations, and multi-document support.
+
+### Added
+
+- **Parametric modeling with variable sets** — `create_variable_set` creates an `App::VarSet` with typed, named variables (length, width, height, etc.) editable in the Data panel. `create_spreadsheet` creates a `Spreadsheet::Sheet` with cell aliases as an alternative. Both work the same way with expression bindings.
+- **`set_expression` tool** — bind any object property to an expression (`"Variables.length"`, `"Variables.wall * 2"`). Supports indexed properties (`Constraints[N]`) and nested properties (`Placement.Base.x`).
+- **Expression support in `create_sketch`** — rectangle dimensions accept expression strings directly: `width="Variables.length"`. Adds DistanceX/DistanceY constraints and binds them automatically.
+- **Expression support in `pad_sketch`** — length accepts expression strings: `length="Variables.height"`.
+- **Per-model parameters** — freeform key-value parameter table in Settings (temperature, top_p, top_k, etc.), saved per model name. Providers can ship default parameter presets. Replaces the single global temperature field.
+- **Strip thinking history** — tristate checkbox in Settings to remove thinking/reasoning content from conversation history. Auto-enabled for Gemma models, required by models that reject thinking content in multi-turn conversations.
+- **Tool call summary** — compact visualization after tool loop: tool count, elapsed time, flow diagram (tool1 → tool2 → ...), and per-tool timing with success/failure indicators.
+- **Batch edge/face operations** — `fillet_edges`, `chamfer_edges`, and `shell_object` now accept filter keywords: `"all"`, `"vertical"`, `"horizontal"`, `"top"`, `"bottom"`, `"front"`, `"back"`, `"left"`, `"right"`, `"circular"`. Filters can be combined: `["top", "vertical"]`.
+- **Filtered queries** — `list_edges` and `list_faces` accept an optional `filter` parameter to show only matching edges/faces.
+- **Constraint solver feedback** — `create_sketch` now reports constraint status (fully constrained, under-constrained with DOF count, over-constrained) and lists all constraints with dimension ones marked `← bindable`.
+- **Multi-document support** — `list_documents` shows all open documents with object counts and active indicator. `switch_document` changes the active document by name or label.
+- **Relative expressions in `modify_property`** — values can be `"+10%"`, `"-20%"`, `"*1.5"`, `"+5"`, `"-3"` for relative modifications instead of requiring absolute values.
+
+### Fixed
+
+- **Fillet/chamfer/shell on Bodies** — when called with a `PartDesign::Body` as `object_name`, now correctly uses `Body.Tip` as the feature base. Previously `_find_body_for` returned `None` (Body doesn't contain itself), causing silent failure.
+- **Moonshot temperature** — removed hardcoded temperature overrides. Moonshot's parameters are now user-editable defaults via the Model Parameters table.
+
+### Changed
+
+- **Settings UI** — merged "Parameters" and "Model Parameters" into a single "Model Parameters" section with fixed fields (Max Output Tokens, Context Window) above the freeform key-value table.
+- **48 tools total** (was 42).
+- **626 unit tests** (was 577).
+
 ## [0.7.0-alpha] - 2026-04-03
 
 Assembly tools, geometry query tools, rate limiting, and community contributions.
@@ -185,6 +215,8 @@ Initial alpha release.
 - **Dual licensing** — LGPL-2.1 (code) + CC0-1.0 (icons)
 - **Zero external dependencies** — uses only Python stdlib
 
+[0.8.0-alpha]: https://github.com/ghbalf/freecad-ai/releases/tag/v0.8.0-alpha
+[0.7.0-alpha]: https://github.com/ghbalf/freecad-ai/releases/tag/v0.7.0-alpha
 [0.6.0-alpha]: https://github.com/ghbalf/freecad-ai/releases/tag/v0.6.0-alpha
 [0.5.0-alpha]: https://github.com/ghbalf/freecad-ai/releases/tag/v0.5.0-alpha
 [0.4.0-alpha]: https://github.com/ghbalf/freecad-ai/releases/tag/v0.4.0-alpha
