@@ -1748,6 +1748,95 @@ LIST_EDGES = ToolDefinition(
 )
 
 
+# ── list_documents ─────────────────────────────────────────
+
+def _handle_list_documents() -> ToolResult:
+    """List all open FreeCAD documents."""
+    import FreeCAD as App
+    from ..core.active_document import resolve_active_document
+
+    docs = list(App.listDocuments().values())
+    if not docs:
+        return ToolResult(success=True, output="No documents open.",
+                          data={"documents": []})
+
+    active = resolve_active_document()
+    active_name = active.Name if active else ""
+
+    lines = [f"## Open Documents ({len(docs)})"]
+    doc_data = []
+    for doc in docs:
+        obj_count = len(doc.Objects)
+        marker = " (active)" if doc.Name == active_name else ""
+        modified = " *" if doc.Modified else ""
+        path = doc.FileName or "(unsaved)"
+        lines.append(
+            f"- **{doc.Name}**{marker}{modified} — "
+            f"{obj_count} objects — {path}"
+        )
+        doc_data.append({
+            "name": doc.Name,
+            "label": doc.Label,
+            "active": doc.Name == active_name,
+            "object_count": obj_count,
+            "modified": doc.Modified,
+            "path": doc.FileName,
+        })
+
+    return ToolResult(success=True, output="\n".join(lines),
+                      data={"documents": doc_data})
+
+
+LIST_DOCUMENTS = ToolDefinition(
+    name="list_documents",
+    description="List all open FreeCAD documents with object counts and active indicator.",
+    category="query",
+    parameters=[],
+    handler=_handle_list_documents,
+)
+
+
+# ── switch_document ───────────────────────────────────────
+
+def _handle_switch_document(document_name: str) -> ToolResult:
+    """Switch the active document."""
+    import FreeCAD as App
+    from ..core.active_document import sync_app_active_document, refresh_gui_for_document
+
+    docs = App.listDocuments()
+    doc = docs.get(document_name)
+    if not doc:
+        # Try matching by label
+        for d in docs.values():
+            if d.Label == document_name:
+                doc = d
+                break
+    if not doc:
+        available = ", ".join(docs.keys())
+        return ToolResult(success=False, output="",
+                          error=f"Document '{document_name}' not found. Available: {available}")
+
+    sync_app_active_document(doc)
+    refresh_gui_for_document(doc)
+
+    return ToolResult(
+        success=True,
+        output=f"Switched to document '{doc.Name}' ({len(doc.Objects)} objects).",
+        data={"name": doc.Name, "label": doc.Label},
+    )
+
+
+SWITCH_DOCUMENT = ToolDefinition(
+    name="switch_document",
+    description="Switch the active FreeCAD document by name or label.",
+    category="query",
+    parameters=[
+        ToolParam("document_name", "string", "Name or label of the document to activate"),
+    ],
+    handler=_handle_switch_document,
+)
+
+
 # ── get_document_state ──────────────────────────────────────
 
 def _handle_get_document_state() -> ToolResult:
@@ -3973,6 +4062,8 @@ ALL_TOOLS = [
     DESCRIBE_MODEL,
     LIST_FACES,
     LIST_EDGES,
+    LIST_DOCUMENTS,
+    SWITCH_DOCUMENT,
     GET_DOCUMENT_STATE,
     MODIFY_PROPERTY,
     EXPORT_MODEL,
