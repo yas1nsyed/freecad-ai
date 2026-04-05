@@ -1870,6 +1870,50 @@ GET_DOCUMENT_STATE = ToolDefinition(
 
 # ── modify_property ─────────────────────────────────────────
 
+def _resolve_relative_value(current, expr: str):
+    """Resolve a relative expression against a current numeric value.
+
+    Supports: "+10%", "-20%", "*1.5", "+5", "-3", or absolute values.
+    Returns the resolved value, or the expression unchanged if not numeric.
+    """
+    if not isinstance(expr, str):
+        return expr
+    expr = expr.strip()
+    if not expr:
+        return expr
+
+    try:
+        current_float = float(current)
+    except (TypeError, ValueError):
+        return expr  # Current value isn't numeric — can't do relative
+
+    # Percentage: "+10%", "-20%"
+    if expr.endswith("%"):
+        try:
+            pct = float(expr[:-1])
+            return current_float * (1 + pct / 100)
+        except ValueError:
+            pass
+
+    # Multiply: "*1.5", "*2"
+    if expr.startswith("*"):
+        try:
+            factor = float(expr[1:])
+            return current_float * factor
+        except ValueError:
+            pass
+
+    # Add/subtract: "+5", "-3"
+    if expr.startswith("+") or (expr.startswith("-") and len(expr) > 1):
+        try:
+            delta = float(expr)
+            return current_float + delta
+        except ValueError:
+            pass
+
+    return expr
+
+
 def _handle_modify_property(
     object_name: str,
     property_name: str,
@@ -1888,11 +1932,21 @@ def _handle_modify_property(
                 error=f"Object '{object_name}' has no property '{property_name}'"
             )
 
-        setattr(obj, property_name, value)
+        current = getattr(obj, property_name)
+        resolved = _resolve_relative_value(current, value)
+
+        # Report old→new for relative changes
+        if resolved != value:
+            msg = f"Set {object_name}.{property_name} = {resolved} (was {current}, applied {value})"
+        else:
+            msg = f"Set {object_name}.{property_name} = {resolved}"
+
+        setattr(obj, property_name, resolved)
         return ToolResult(
             success=True,
-            output=f"Set {object_name}.{property_name} = {value}",
-            data={"name": object_name, "property": property_name, "value": value},
+            output=msg,
+            data={"name": object_name, "property": property_name,
+                  "value": resolved, "previous": current},
         )
 
     return _with_undo("Modify Property", do)
@@ -1900,12 +1954,18 @@ def _handle_modify_property(
 
 MODIFY_PROPERTY = ToolDefinition(
     name="modify_property",
-    description="Modify a property on a document object (e.g. Length, Width, Height, Radius, Label, Visibility).",
+    description=(
+        "Modify a property on a document object (e.g. Length, Width, Height, Radius). "
+        "Values can be absolute (50) or relative expressions: "
+        "'+10%' (increase by 10%), '-20%' (decrease by 20%), '*1.5' (multiply by 1.5), "
+        "'+5' (add 5mm), '-3' (subtract 3mm)."
+    ),
     category="modeling",
     parameters=[
         ToolParam("object_name", "string", "Internal name of the object"),
         ToolParam("property_name", "string", "Name of the property to modify"),
-        ToolParam("value", "string", "New value for the property (numbers and booleans are auto-converted)"),
+        ToolParam("value", "string",
+                  "New value or relative expression (e.g. 50, '+10%', '*1.5', '+5')"),
     ],
     handler=_handle_modify_property,
 )
