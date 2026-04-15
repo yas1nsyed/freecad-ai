@@ -36,17 +36,26 @@ class Conversation:
             self.created_at = time.time()
         self.compaction_enabled = True
 
-    def add_user_message(self, content: str, images: list[dict] | None = None):
-        """Add a user message, optionally with image content blocks.
+    def add_user_message(self, content: str, images: list[dict] | None = None,
+                         documents: list[dict] | None = None):
+        """Add a user message, optionally with images and/or documents.
 
         Args:
             content: The text content of the message.
             images: Optional list of image dicts, each with keys:
                     type, source, media_type, data (base64).
+            documents: Optional list of document dicts, each with keys:
+                       filename, text.
         """
-        if images:
+        if images or documents:
             blocks = [{"type": "text", "text": content}]
-            blocks.extend(images)
+            # Append document content as labeled text blocks
+            for doc in (documents or []):
+                blocks.append({
+                    "type": "text",
+                    "text": f"--- Attached file: {doc['filename']} ---\n{doc['text']}",
+                })
+            blocks.extend(images or [])
             self.messages.append({"role": "user", "content": blocks})
         else:
             self.messages.append({"role": "user", "content": content})

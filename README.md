@@ -11,10 +11,11 @@ An AI-powered assistant workbench for FreeCAD that generates and executes Python
 - **Tool calling** — 48 structured FreeCAD operations (Act mode) for safer, more reliable modeling
 - **Skills** — reusable instruction sets the model invokes autonomously or via `/command` (enclosure, gear, fastener holes, etc.)
 - **Skill optimizer** — automatically improve skill instructions via iterative test-evaluate-modify loop (`/optimize-skill`)
-- **Hooks** — user-defined Python hooks for lifecycle events (block tools, modify input, log activity)
+- **Hooks** — user-defined Python hooks for lifecycle events (block tools, modify input, log activity, convert file attachments)
 - **User extension tools** — register your own Python functions as LLM-callable tools (`.py` or `.FCMacro`)
 - **Vision routing** — auto-detects LLM vision capability; non-vision models use MCP fallback via [llm-vision-mcp](https://github.com/ghbalf/llm-vision-mcp), no-vision-path disables image controls
-- **Image support** — attach viewport screenshots and images to chat messages (capture, attach, drag-drop, paste)
+- **File attachments** — attach images, text files, and documents to chat messages (capture, attach, drag-drop, paste); extensible via `file_attach` hook for binary formats (PDF, DOCX) or MCP servers for rich conversion
+- **Image support** — viewport screenshots and images sent as vision blocks; auto-detected binary format rejection (PDF, ZIP, Office docs)
 - **Thinking mode** — enable LLM reasoning for complex multi-step tasks (Off / On / Extended)
 - **Context compacting** — automatically summarizes older messages when approaching context limits
 - **Session resume** — save and load chat sessions to continue work later
@@ -245,6 +246,30 @@ Thinking is displayed dimmed in the chat. Provider support varies — Anthropic 
 ### Session Resume
 
 Conversations are auto-saved after each LLM response. Click the **Load** button in the chat footer to resume a previous session from the last 20 saved conversations.
+
+### File Attachments
+
+Attach files to chat messages via the **Attach** button, drag-and-drop, or paste:
+
+| File type | Handling |
+|-----------|----------|
+| Images (PNG, JPG, etc.) | Sent as vision blocks (requires vision-capable model or MCP fallback) |
+| Text files (TXT, MD, CSV, PY, JSON, etc.) | Read as text and included in the message |
+| Binary files (PDF, DOCX, XLSX, etc.) | Converted via `file_attach` hook or MCP server |
+
+**Why no built-in PDF/DOCX support?** FreeCAD AI has a strict zero-external-dependencies policy — it uses only Python stdlib and runs inside FreeCAD's bundled Python. PDF/DOCX parsing requires external C libraries that cannot be bundled portably. Instead, two extensibility paths are provided:
+
+1. **Hooks** — lightweight, user-installed shell commands. Create a `file_attach` hook that calls CLI tools like `pdftotext` or `pandoc`. See `docs/hooks/file-attach-example/` for a ready-to-use example. Text-only output.
+2. **MCP servers** — for rich conversion with images and structure preservation. Install a server like [markdownify-mcp](https://github.com/zcaceres/markdownify-mcp) in Settings → MCP Servers.
+
+To install the example PDF hook:
+
+```bash
+cp -r docs/hooks/file-attach-example/ ~/.config/FreeCAD/FreeCADAI/hooks/file-attach/
+# Requires: sudo apt install poppler-utils  (provides pdftotext)
+```
+
+Binary files are detected by magic bytes (PDF, ZIP/Office, PNG, JPEG, ELF, etc.) and null-byte content scanning.
 
 ### AGENTS.md
 

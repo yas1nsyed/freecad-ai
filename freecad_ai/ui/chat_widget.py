@@ -47,6 +47,37 @@ from .message_view import (
 from .code_review_dialog import CodeReviewDialog
 
 
+# Known binary file magic bytes — prevents misdetecting binary files as text
+_BINARY_MAGIC = (
+    b"%PDF",          # PDF
+    b"PK\x03\x04",    # ZIP, DOCX, XLSX, PPTX, ODT, JAR
+    b"PK\x05\x06",    # ZIP (empty archive)
+    b"\x89PNG",        # PNG
+    b"\xff\xd8\xff",   # JPEG
+    b"GIF8",           # GIF
+    b"RIFF",           # WEBP, AVI, WAV
+    b"\x7fELF",        # ELF binary
+    b"\xd0\xcf\x11",   # MS Office legacy (DOC, XLS, PPT)
+    b"\x1f\x8b",       # gzip
+    b"BZ",             # bzip2
+    b"\xfd7zXZ",       # xz
+    b"Rar!",           # RAR
+    b"\x00\x00\x01\x00",  # ICO
+    b"\x00asm",        # WebAssembly
+)
+
+
+def _is_binary_content(data: bytes) -> bool:
+    """Detect binary content by magic bytes and null-byte presence."""
+    header = data[:8]
+    for magic in _BINARY_MAGIC:
+        if header[:len(magic)] == magic:
+            return True
+    if b"\x00" in data[:8192]:
+        return True
+    return False
+
+
 # ── LLM Worker Thread ───────────────────────────────────────
 
 class _LLMWorker(QThread):
@@ -370,6 +401,7 @@ class _ImageAwareTextEdit(QTextEdit):
     """Text input that accepts pasted/dropped images."""
 
     image_added = Signal(str, str)  # (media_type, base64_data)
+    document_added = Signal(str, str)  # (filename, text_content)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -381,17 +413,19 @@ class _ImageAwareTextEdit(QTextEdit):
         self.setAcceptDrops(enabled)
 
     def insertFromMimeData(self, source):
-        """Handle paste — extract image if present."""
-        if not self._images_enabled:
-            super().insertFromMimeData(source)
-            return
-        if source.hasImage():
+        """Handle paste — extract image or text file if present."""
+        if source.hasImage() and self._images_enabled:
             self._process_image_from_mime(source)
         elif source.hasUrls():
             for url in source.urls():
                 path = url.toLocalFile()
-                if path and self._is_image_file(path):
+                if not path:
+                    continue
+                if self._is_image_file(path) and self._images_enabled:
                     self._process_image_file(path)
+                    return
+                # Try any non-image file as text
+                if self._process_text_file(path):
                     return
             super().insertFromMimeData(source)
         else:
@@ -405,15 +439,25 @@ class _ImageAwareTextEdit(QTextEdit):
 
     def dropEvent(self, event):
         mime = event.mimeData()
-        if mime.hasImage():
+        if mime.hasImage() and self._images_enabled:
             self._process_image_from_mime(mime)
         elif mime.hasUrls():
             for url in mime.urls():
                 path = url.toLocalFile()
-                if path and self._is_image_file(path):
+                if not path:
+                    continue
+                if self._is_image_file(path) and self._images_enabled:
                     self._process_image_file(path)
                     return
-            super().dropEvent(event)
+                # Try any non-image file as text (detect by reading)
+                if self._process_text_file(path):
+                    return
+            # Not handled (binary file etc.) — forward to ChatDockWidget
+            parent = self.parent()
+            while parent and not isinstance(parent, ChatDockWidget):
+                parent = parent.parent()
+            if parent:
+                parent.dropEvent(event)
         else:
             super().dropEvent(event)
 
@@ -455,23 +499,55 @@ class _ImageAwareTextEdit(QTextEdit):
         ext = path.rsplit(".", 1)[-1].lower() if "." in path else ""
         return ext in ("png", "jpg", "jpeg", "bmp", "gif", "webp")
 
+    @staticmethod
+    def _is_text_file(path: str) -> bool:
+        import os
+        ext = path.rsplit(".", 1)[-1].lower() if "." in path else ""
+        name = os.path.basename(path).lower()
+        return ext in ChatDockWidget._TEXT_EXTENSIONS or name in ("makefile", "dockerfile")
+
+    def _process_text_file(self, path: str) -> bool:
+        """Try to read a file as text and emit document_added signal.
+
+        Rejects known binary formats (by magic bytes) and files
+        containing null bytes. Returns True if successfully read.
+        """
+        import os
+        try:
+            size = os.path.getsize(path)
+            if size > 512_000:
+                return False
+            with open(path, "rb") as f:
+                raw = f.read()
+            if _is_binary_content(raw):
+                return False
+            text = raw.decode("utf-8", errors="replace")
+            self.document_added.emit(os.path.basename(path), text)
+            return True
+        except OSError:
+            return False
+
 
 class _AttachmentStrip(QtWidgets.QWidget):
-    """Horizontal strip of image thumbnail previews with remove buttons."""
+    """Horizontal strip of attachment previews (image thumbnails and document chips)."""
 
     image_removed = Signal(int)
 
     def __init__(self, parent=None):
         super().__init__(parent)
+        self.setAcceptDrops(False)  # Drops handled by ChatDockWidget
         self._layout = QHBoxLayout(self)
         self._layout.setContentsMargins(0, 0, 0, 0)
         self._layout.setSpacing(4)
         self._layout.addStretch()
-        self._items = []  # list of (widget, media_type, base64_data)
+        # Each item: (widget, kind, data_dict)
+        #   kind="image" → data_dict = {"media_type": str, "data": str}
+        #   kind="document" → data_dict = {"filename": str, "text": str}
+        self._items: list[tuple[QtWidgets.QWidget, str, dict]] = []
         self.hide()
 
     def add_image(self, media_type: str, base64_data: str):
-        """Add a thumbnail to the strip."""
+        """Add an image thumbnail to the strip."""
         import base64 as b64
 
         container = QtWidgets.QWidget()
@@ -500,18 +576,58 @@ class _AttachmentStrip(QtWidgets.QWidget):
 
         # Insert before the stretch
         self._layout.insertWidget(self._layout.count() - 1, container)
-        self._items.append((container, media_type, base64_data))
+        self._items.append((container, "image", {"media_type": media_type, "data": base64_data}))
+        self.show()
+
+    def add_document(self, filename: str, text: str):
+        """Add a document chip (filename badge) to the strip."""
+        container = QtWidgets.QWidget()
+        container_layout = QHBoxLayout(container)
+        container_layout.setContentsMargins(4, 2, 4, 2)
+        container_layout.setSpacing(4)
+
+        colors = _get_theme_colors()
+
+        # Filename label with truncation
+        display_name = filename if len(filename) <= 24 else filename[:10] + "..." + filename[-10:]
+        label = QLabel(display_name)
+        label.setToolTip(filename)
+        label.setStyleSheet(
+            f"font-size: 10px; color: {colors['chat_text']}; "
+            f"background: {colors['chat_bg']}; "
+            f"border: 1px solid {colors['chat_border']}; "
+            f"border-radius: 3px; padding: 2px 6px;"
+        )
+        container_layout.addWidget(label)
+
+        # Remove button
+        remove_btn = QPushButton("x")
+        remove_btn.setMaximumSize(16, 16)
+        remove_btn.setStyleSheet(f"font-size: 10px; padding: 0; border: none; color: {colors['tool_error_text']};")
+        idx = len(self._items)
+        remove_btn.clicked.connect(lambda checked=False, i=idx: self._remove(i))
+        container_layout.addWidget(remove_btn)
+
+        self._layout.insertWidget(self._layout.count() - 1, container)
+        self._items.append((container, "document", {"filename": filename, "text": text}))
         self.show()
 
     def get_images(self) -> list[dict]:
         """Return list of image content block dicts."""
         return [
-            {"type": "image", "source": "base64", "media_type": mt, "data": data}
-            for _, mt, data in self._items
+            {"type": "image", "source": "base64", "media_type": d["media_type"], "data": d["data"]}
+            for _, kind, d in self._items if kind == "image"
+        ]
+
+    def get_documents(self) -> list[dict]:
+        """Return list of document attachment dicts."""
+        return [
+            {"filename": d["filename"], "text": d["text"]}
+            for _, kind, d in self._items if kind == "document"
         ]
 
     def clear(self):
-        """Remove all thumbnails."""
+        """Remove all attachments."""
         for widget, _, _ in self._items:
             widget.deleteLater()
         self._items.clear()
@@ -565,6 +681,7 @@ class ChatDockWidget(QDockWidget):
         self._build_ui()
         self._ensure_vision_fallback()
         self._refresh_image_controls()
+        self.setAcceptDrops(True)
 
     def _build_ui(self):
         container = QWidget()
@@ -608,6 +725,7 @@ class ChatDockWidget(QDockWidget):
 
         # ── Chat display ──
         self.chat_display = QTextBrowser()
+        self.chat_display.setAcceptDrops(False)  # Drops handled by ChatDockWidget
         self.chat_display.setOpenExternalLinks(False)
         self.chat_display.setOpenLinks(False)
         self.chat_display.setFont(QFont("Sans", 10))
@@ -633,6 +751,7 @@ class ChatDockWidget(QDockWidget):
         )
         self.input_edit.installEventFilter(self)
         self.input_edit.image_added.connect(self._on_image_added)
+        self.input_edit.document_added.connect(self._on_document_added)
         input_layout.addWidget(self.input_edit, 1)
 
         # Button column: attach + send
@@ -641,8 +760,8 @@ class ChatDockWidget(QDockWidget):
 
         self._attach_btn = QPushButton(translate("ChatDockWidget", "Attach"))
         self._attach_btn.setMaximumHeight(20)
-        self._attach_btn.setToolTip(translate("ChatDockWidget", "Attach an image file"))
-        self._attach_btn.clicked.connect(self._attach_image)
+        self._attach_btn.setToolTip(translate("ChatDockWidget", "Attach a file (image, text, or document)"))
+        self._attach_btn.clicked.connect(self._attach_file)
         btn_layout.addWidget(self._attach_btn)
 
         self.send_btn = QPushButton(translate("ChatDockWidget", "Send"))
@@ -782,6 +901,10 @@ class ChatDockWidget(QDockWidget):
         # Collect attached images
         images = pending_images or None
 
+        # Collect attached documents
+        pending_docs = self._attachment_strip.get_documents()
+        documents = pending_docs or None
+
         # Auto-capture viewport if configured
         capture_mode = getattr(self, "_capture_mode_override", None) or get_config().viewport_capture
         if capture_mode == "every_message":
@@ -795,7 +918,7 @@ class ChatDockWidget(QDockWidget):
             self._pending_viewport_image = None
 
         # Add to conversation and display
-        self.conversation.add_user_message(text, images=images)
+        self.conversation.add_user_message(text, images=images, documents=documents)
         display_content = self.conversation.messages[-1]["content"]
         self._append_html(render_message("user", display_content))
         self._attachment_strip.clear()
@@ -812,8 +935,79 @@ class ChatDockWidget(QDockWidget):
         """Handle image added via paste or drop."""
         self._attachment_strip.add_image(media_type, base64_data)
 
-    def _attach_image(self):
-        """Open file picker to attach an image."""
+    def _on_document_added(self, filename: str, text: str):
+        """Handle text file added via paste or drop."""
+        self._attachment_strip.add_document(filename, text)
+
+    # ── Dock-level drag-and-drop (accepts drops anywhere on the panel) ──
+
+    def dragEnterEvent(self, event):
+        if event.mimeData().hasUrls() or event.mimeData().hasImage():
+            event.acceptProposedAction()
+        else:
+            super().dragEnterEvent(event)
+
+    def dragMoveEvent(self, event):
+        """Accept drag move so the drop cursor stays valid."""
+        if event.mimeData().hasUrls() or event.mimeData().hasImage():
+            event.acceptProposedAction()
+        else:
+            super().dragMoveEvent(event)
+
+    def dropEvent(self, event):
+        """Handle files dropped anywhere on the chat panel."""
+        import os
+        mime = event.mimeData()
+        if mime.hasImage() and self.input_edit._images_enabled:
+            self.input_edit._process_image_from_mime(mime)
+            event.acceptProposedAction()
+            return
+        if mime.hasUrls():
+            for url in mime.urls():
+                path = url.toLocalFile()
+                if not path:
+                    continue
+                filename = os.path.basename(path)
+                ext = path.rsplit(".", 1)[-1].lower() if "." in path else ""
+                # Image files
+                if ext in ("png", "jpg", "jpeg", "bmp", "gif", "webp"):
+                    if self.input_edit._images_enabled:
+                        self.input_edit._process_image_file(path)
+                    else:
+                        self._append_html(render_message("system",
+                            "Cannot attach images — no vision support detected. Check Settings or use a vision-capable model."))
+                    event.acceptProposedAction()
+                    return
+                # Try reading as text
+                text = self._read_text_file(path)
+                if text is not None:
+                    self._attachment_strip.add_document(filename, text)
+                    event.acceptProposedAction()
+                    return
+                # Binary file — try hook
+                self._process_file_with_hook(path, filename, ext)
+                event.acceptProposedAction()
+                return
+        super().dropEvent(event)
+
+    # File extensions that can be read as text without external tools.
+    _TEXT_EXTENSIONS = {
+        "txt", "md", "csv", "tsv", "json", "xml", "yaml", "yml",
+        "ini", "cfg", "conf", "toml", "log", "py", "js", "ts",
+        "html", "htm", "css", "sql", "sh", "bash", "bat", "ps1",
+        "c", "cpp", "h", "hpp", "java", "rs", "go", "rb", "lua",
+        "r", "m", "tex", "bib", "svg", "makefile", "dockerfile",
+    }
+
+    def _attach_file(self):
+        """Open file picker to attach an image or document.
+
+        Routing logic:
+        - Image files → sent as base64 vision blocks (handled by LLM vision)
+        - Text files → read content, included as text in the message
+        - Other files → fire 'file_attach' hook for user-defined conversion;
+          if no hook handles the file, show a helpful message
+        """
         try:
             import FreeCADGui as Gui
             parent = Gui.getMainWindow()
@@ -821,12 +1015,89 @@ class ChatDockWidget(QDockWidget):
             parent = self
         path, _ = QtWidgets.QFileDialog.getOpenFileName(
             parent,
-            translate("ChatDockWidget", "Attach Image"),
+            translate("ChatDockWidget", "Attach File"),
             "",
-            translate("ChatDockWidget", "Images (*.png *.jpg *.jpeg *.bmp *.gif *.webp)"),
+            translate("ChatDockWidget",
+                      "All supported files (*.png *.jpg *.jpeg *.bmp *.gif *.webp "
+                      "*.txt *.md *.csv *.tsv *.json *.xml *.yaml *.yml "
+                      "*.ini *.cfg *.conf *.toml *.log *.py *.js *.ts "
+                      "*.html *.htm *.css *.sql *.sh *.bash *.svg "
+                      "*.c *.cpp *.h *.hpp *.java *.rs *.go *.rb *.lua "
+                      "*.pdf *.docx *.xlsx *.odt *.rtf);;"
+                      "Images (*.png *.jpg *.jpeg *.bmp *.gif *.webp);;"
+                      "Text files (*.txt *.md *.csv *.json *.xml *.yaml *.py *.js *.ts);;"
+                      "All files (*)"),
         )
-        if path:
+        if not path:
+            return
+        import os
+        ext = path.rsplit(".", 1)[-1].lower() if "." in path else ""
+        filename = os.path.basename(path)
+
+        # Route 1: Image files → vision block (requires vision support)
+        if ext in ("png", "jpg", "jpeg", "bmp", "gif", "webp"):
+            if not self.input_edit._images_enabled:
+                self._append_html(render_message("system",
+                    "Cannot attach images — no vision support detected. "
+                    "Check Settings or use a vision-capable model."))
+                return
             self.input_edit._process_image_file(path)
+            return
+
+        # Route 2: Try to read as text — known extensions first, then probe
+        text = self._read_text_file(path)
+        if text is not None:
+            self._attachment_strip.add_document(filename, text)
+            return
+
+        # Route 3: Binary/unknown files → fire file_attach hook
+        self._process_file_with_hook(path, filename, ext)
+
+    def _read_text_file(self, path: str, max_size: int = 512_000) -> str | None:
+        """Read a file as text, return content or None if binary/error.
+
+        Rejects known binary formats (by magic bytes) and files
+        containing null bytes.
+        """
+        import os
+        try:
+            size = os.path.getsize(path)
+            if size > max_size:
+                self._append_html(render_message("system",
+                    f"File too large ({size // 1024} KB). Maximum is {max_size // 1024} KB."))
+                return None
+            with open(path, "rb") as f:
+                raw = f.read()
+            if _is_binary_content(raw):
+                return None  # Binary file — let the hook handle it
+            return raw.decode("utf-8", errors="replace")
+        except OSError as e:
+            self._append_html(render_message("system", f"Cannot read file: {e}"))
+            return None
+
+    def _process_file_with_hook(self, path: str, filename: str, ext: str):
+        """Try to convert a file via the file_attach hook."""
+        from ..hooks import fire_hook
+        import mimetypes
+        mime_type = mimetypes.guess_type(path)[0] or "application/octet-stream"
+        result = fire_hook("file_attach", {
+            "path": path,
+            "filename": filename,
+            "extension": ext,
+            "mime_type": mime_type,
+        })
+        if result.get("block"):
+            self._append_html(render_message("system",
+                f"Attachment blocked: {result.get('reason', 'no reason given')}"))
+            return
+        if result.get("text"):
+            self._attachment_strip.add_document(filename, result["text"])
+            return
+        # No hook handled it
+        self._append_html(render_message("system",
+            f"No converter for .{ext} files. To handle this format, either:\n"
+            f"- Add a file_attach hook (see docs/hooks/file-attach-example/)\n"
+            f"- Install an MCP server like markdownify-mcp for rich conversion"))
 
     def _capture_viewport_for_chat(self) -> dict | None:
         """Capture the viewport and return an image content block dict."""
@@ -911,15 +1182,18 @@ class ChatDockWidget(QDockWidget):
         )
 
         self._capture_btn.setEnabled(not disable)
-        self._attach_btn.setEnabled(not disable)
         self.input_edit.set_images_enabled(not disable)
+        # Attach button always enabled — supports text/document files regardless of vision
+        self._attach_btn.setEnabled(True)
 
         if disable:
             self._capture_btn.setToolTip(no_vision_tip)
-            self._attach_btn.setToolTip(no_vision_tip)
+            self._attach_btn.setToolTip(translate("ChatDockWidget",
+                "Attach a file (text/document — image attach requires vision)"))
         else:
             self._capture_btn.setToolTip(translate("ChatDockWidget", "Viewport capture: off"))
-            self._attach_btn.setToolTip(translate("ChatDockWidget", "Attach an image file"))
+            self._attach_btn.setToolTip(translate("ChatDockWidget",
+                "Attach a file (image, text, or document)"))
 
     def _open_settings(self):
         """Open the settings dialog."""
@@ -942,6 +1216,9 @@ class ChatDockWidget(QDockWidget):
         if cfg.mcp_servers != old_mcp:
             self._vision_fallback_tool = None
             self._mcp_connected = False
+            # Disconnect old MCP servers so stale connections don't linger
+            from ..mcp.manager import get_mcp_manager
+            get_mcp_manager().disconnect_all()
         self._ensure_vision_fallback()
         self._refresh_image_controls()
 

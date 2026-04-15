@@ -14,7 +14,7 @@ BUILTIN_HOOKS_DIR = os.path.join(
     "hooks",
 )
 
-VALID_EVENTS = ("pre_tool_use", "post_tool_use", "user_prompt_submit", "post_response")
+VALID_EVENTS = ("pre_tool_use", "post_tool_use", "user_prompt_submit", "post_response", "file_attach")
 
 
 def _get_disabled() -> list:
