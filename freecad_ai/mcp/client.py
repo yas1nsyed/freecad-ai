@@ -45,12 +45,13 @@ class MCPClient:
     """
 
     def __init__(self, name: str, command: list[str], env: dict | None = None,
-                 *, deferred: bool = True):
+                 *, deferred: bool = True, tool_call_timeout: float = 600):
         self.name = name
         self._transport = StdioClientTransport(command, env)
         self._tools: list[MCPToolInfo] = []
         self._connected = False
         self._deferred = deferred
+        self._tool_call_timeout = tool_call_timeout
         # Cache for lazily-loaded full schemas: tool_name -> inputSchema dict
         self._schema_cache: dict[str, dict] = {}
         # Raw server response stored for deferred schema extraction
@@ -176,12 +177,12 @@ class MCPClient:
                 results.append(tool)
         return results
 
-    def call_tool(self, name: str, arguments: dict) -> MCPToolResult:
+    def call_tool(self, name: str, arguments: dict, timeout: float | None = None) -> MCPToolResult:
         """Invoke a tool on the MCP server."""
         resp = self._transport.send_request("tools/call", {
             "name": name,
             "arguments": arguments,
-        })
+        }, timeout=timeout if timeout is not None else self._tool_call_timeout)
 
         if "error" in resp:
             return MCPToolResult(

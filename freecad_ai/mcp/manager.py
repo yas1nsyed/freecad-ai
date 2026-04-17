@@ -55,7 +55,9 @@ class MCPManager:
             env = cfg.get("env") or None
 
             try:
-                client = MCPClient(name, command, env, deferred=deferred)
+                tool_call_timeout = float(cfg.get("timeout", 600))
+                client = MCPClient(name, command, env, deferred=deferred,
+                                   tool_call_timeout=tool_call_timeout)
                 client.connect()
                 self._clients[name] = client
             except Exception as e:

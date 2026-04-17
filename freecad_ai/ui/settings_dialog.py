@@ -866,6 +866,9 @@ class SettingsDialog(QDialog):
             tags.append("disabled")
         if entry.get("deferred", True):
             tags.append("deferred")
+        timeout = int(entry.get("timeout", 600))
+        if timeout != 600:
+            tags.append(f"{timeout}s")
         prefix = f"({', '.join(tags)}) " if tags else ""
         args = " ".join(entry.get("args", []))
         return f"{prefix}{entry.get('name', '?')} — {entry.get('command', '')} {args}"
@@ -1213,6 +1216,18 @@ class _AddMCPServerDialog(QDialog):
         self.args_edit.setToolTip(translate("AddMCPServerDialog", "Space-separated arguments"))
         layout.addRow(translate("AddMCPServerDialog", "Args:"), self.args_edit)
 
+        self.timeout_spin = QSpinBox()
+        self.timeout_spin.setRange(5, 3600)
+        self.timeout_spin.setValue(600)
+        self.timeout_spin.setSuffix(translate("AddMCPServerDialog", " s"))
+        self.timeout_spin.setToolTip(
+            translate("AddMCPServerDialog",
+                      "Maximum time to wait for a tool call to complete.\n"
+                      "Raise for slow tools (vision models, large builds).\n"
+                      "Lower for fast tools where you want to fail quickly.")
+        )
+        layout.addRow(translate("AddMCPServerDialog", "Tool call timeout:"), self.timeout_spin)
+
         self.deferred_check = QCheckBox(translate("AddMCPServerDialog", "Deferred tool loading"))
         self.deferred_check.setChecked(True)
         self.deferred_check.setToolTip(
@@ -1249,6 +1264,7 @@ class _AddMCPServerDialog(QDialog):
         self.args_edit.setText(" ".join(entry.get("args", [])))
         self.deferred_check.setChecked(entry.get("deferred", True))
         self.enabled_check.setChecked(entry.get("enabled", True))
+        self.timeout_spin.setValue(int(entry.get("timeout", 600)))
 
     def get_config(self) -> dict:
         args_text = self.args_edit.text().strip()
@@ -1259,4 +1275,5 @@ class _AddMCPServerDialog(QDialog):
             "env": {},
             "enabled": self.enabled_check.isChecked(),
             "deferred": self.deferred_check.isChecked(),
+            "timeout": self.timeout_spin.value(),
         }

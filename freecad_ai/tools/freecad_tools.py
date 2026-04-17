@@ -408,6 +408,20 @@ def _handle_create_sketch(
                 if "first" not in con and con_type not in ("Block",):
                     continue
 
+                # Remove auto-generated constraint that matches this one
+                # so the explicit constraint overwrites it.
+                first = con.get("first", -2000)
+                first_pos = con.get("first_pos", 0)
+                second = con.get("second", -2000)
+                second_pos = con.get("second_pos", 0)
+                for ci in range(sketch.ConstraintCount - 1, -1, -1):
+                    ec = sketch.Constraints[ci]
+                    if (ec.Type == con_type
+                            and ec.First == first
+                            and ec.Second == second):
+                        sketch.delConstraint(ci)
+                        break
+
                 args = [con_type]
                 for key in ("first", "first_pos", "second", "second_pos", "value"):
                     if key in con:
@@ -492,7 +506,13 @@ CREATE_SKETCH = ToolDefinition(
         "Create a 2D sketch with geometry (lines, circles, arcs, rectangles) and constraints. "
         "For PartDesign, specify body_name to add the sketch to a body. "
         "Rectangle dimensions can be expression strings for parametric models: "
-        "width='Variables.length', height='Variables.width'."
+        "width='Variables.length', height='Variables.width'. "
+        "IMPORTANT: rectangles and circles auto-generate all necessary constraints "
+        "(Coincident, Horizontal, Vertical, DistanceX, DistanceY, Radius). "
+        "Do NOT add DistanceX/DistanceY/Radius in the constraints array for these — "
+        "they are already constrained by the coordinates and dimensions you provide. "
+        "COORDINATE SYSTEM: FreeCAD sketches use Y-up. When converting from SVG, images, "
+        "or screen coordinates (which use Y-down), negate all Y values."
     ),
     category="modeling",
     parameters=[
@@ -514,6 +534,322 @@ CREATE_SKETCH = ToolDefinition(
         ToolParam("offset", "number", "Offset the sketch along the plane normal (e.g. offset=40 on XY places sketch at z=40)", required=False, default=0.0),
     ],
     handler=_handle_create_sketch,
+)
+
+
+# ── edit_sketch ────────────────────────────────────────────
+
+def _handle_edit_sketch(
+    sketch_name: str,
+    add_geometries: list | None = None,
+    remove_geometries: list | None = None,
+    add_constraints: list | None = None,
+    remove_constraints: list | None = None,
+    clear_all: bool = False,
+    label: str = "",
+) -> ToolResult:
+    """Add/remove geometry and constraints on an existing sketch."""
+    import FreeCAD as App
+    import Part
+    import Sketcher
+
+    def do(doc):
+        sketch = _get_object(doc, sketch_name)
+        if not sketch:
+            hint = _suggest_similar(doc, sketch_name, "Sketcher")
+            return ToolResult(success=False, output="",
+                              error=f"Sketch '{sketch_name}' not found.{hint}")
+
+        if not hasattr(sketch, "addGeometry"):
+            return ToolResult(success=False, output="",
+                              error=f"'{sketch_name}' is not a sketch.")
+
+        geo_added = 0
+        geo_removed = 0
+        con_added = 0
+        con_removed = 0
+        warnings = []
+
+        # ── Clear all geometry and constraints (for full replacement)
+        if clear_all:
+            while sketch.ConstraintCount > 0:
+                sketch.delConstraint(sketch.ConstraintCount - 1)
+                con_removed += 1
+            while sketch.GeometryCount > 0:
+                sketch.delGeometry(sketch.GeometryCount - 1)
+                geo_removed += 1
+
+        # ── Remove constraints first (before geometry removal shifts indices)
+        if remove_constraints:
+            indices = sorted((int(i) for i in remove_constraints), reverse=True)
+            for idx in indices:
+                if 0 <= idx < sketch.ConstraintCount:
+                    sketch.delConstraint(idx)
+                    con_removed += 1
+
+        # ── Remove geometries (highest-first)
+        if remove_geometries:
+            indices = sorted((int(i) for i in remove_geometries), reverse=True)
+            for idx in indices:
+                if 0 <= idx < sketch.GeometryCount:
+                    sketch.delGeometry(idx)
+                    geo_removed += 1
+
+        # ── Add geometries
+        if add_geometries:
+            for geo in add_geometries:
+                if isinstance(geo, str):
+                    try:
+                        import json as _json
+                        geo = _json.loads(geo)
+                    except (ValueError, TypeError):
+                        continue
+                geo_type = geo.get("type", "")
+                if geo_type == "line":
+                    p1 = App.Vector(geo.get("x1", 0), geo.get("y1", 0), 0)
+                    p2 = App.Vector(geo.get("x2", 0), geo.get("y2", 0), 0)
+                    sketch.addGeometry(Part.LineSegment(p1, p2))
+                    geo_added += 1
+                elif geo_type == "circle":
+                    cx = geo.get("cx", geo.get("x", 0))
+                    cy = geo.get("cy", geo.get("y", 0))
+                    r = geo.get("radius", 10)
+                    sketch.addGeometry(Part.Circle(
+                        App.Vector(cx, cy, 0), App.Vector(0, 0, 1), r))
+                    geo_added += 1
+                elif geo_type == "arc":
+                    cx = geo.get("cx", geo.get("x", 0))
+                    cy = geo.get("cy", geo.get("y", 0))
+                    r = geo.get("radius", 10)
+                    start_angle = geo.get("start_angle", 0)
+                    end_angle = geo.get("end_angle", 3.14159)
+                    sketch.addGeometry(Part.ArcOfCircle(
+                        Part.Circle(App.Vector(cx, cy, 0), App.Vector(0, 0, 1), r),
+                        start_angle, end_angle))
+                    geo_added += 1
+                elif geo_type == "rectangle":
+                    rect_w = geo.get("width", None)
+                    rect_h = geo.get("height", None) or geo.get("length", None)
+                    if rect_w is not None and rect_h is not None:
+                        x1 = geo.get("x", 0)
+                        y1 = geo.get("y", 0)
+                        x2 = x1 + float(rect_w)
+                        y2 = y1 + float(rect_h)
+                    else:
+                        x1, y1 = geo.get("x1", 0), geo.get("y1", 0)
+                        x2, y2 = geo.get("x2", 10), geo.get("y2", 10)
+                    sketch.addGeometry(Part.LineSegment(App.Vector(x1, y1, 0), App.Vector(x2, y1, 0)))
+                    sketch.addGeometry(Part.LineSegment(App.Vector(x2, y1, 0), App.Vector(x2, y2, 0)))
+                    sketch.addGeometry(Part.LineSegment(App.Vector(x2, y2, 0), App.Vector(x1, y2, 0)))
+                    sketch.addGeometry(Part.LineSegment(App.Vector(x1, y2, 0), App.Vector(x1, y1, 0)))
+                    g = sketch.GeometryCount - 4
+                    sketch.addConstraint(Sketcher.Constraint("Coincident", g, 2, g+1, 1))
+                    sketch.addConstraint(Sketcher.Constraint("Coincident", g+1, 2, g+2, 1))
+                    sketch.addConstraint(Sketcher.Constraint("Coincident", g+2, 2, g+3, 1))
+                    sketch.addConstraint(Sketcher.Constraint("Coincident", g+3, 2, g, 1))
+                    sketch.addConstraint(Sketcher.Constraint("Horizontal", g))
+                    sketch.addConstraint(Sketcher.Constraint("Horizontal", g+2))
+                    sketch.addConstraint(Sketcher.Constraint("Vertical", g+1))
+                    sketch.addConstraint(Sketcher.Constraint("Vertical", g+3))
+                    sketch.addConstraint(
+                        Sketcher.Constraint("DistanceX", g, 1, g, 2, float(x2 - x1)))
+                    sketch.addConstraint(
+                        Sketcher.Constraint("DistanceY", g+1, 1, g+1, 2, float(y2 - y1)))
+                    geo_added += 4
+                elif geo_type == "polygon":
+                    points = geo.get("points", [])
+                    if len(points) >= 2:
+                        for i in range(len(points)):
+                            p1 = App.Vector(points[i][0], points[i][1], 0)
+                            p2 = App.Vector(points[(i + 1) % len(points)][0],
+                                            points[(i + 1) % len(points)][1], 0)
+                            sketch.addGeometry(Part.LineSegment(p1, p2))
+                            geo_added += 1
+                        n = len(points)
+                        base = sketch.GeometryCount - n
+                        for i in range(n):
+                            sketch.addConstraint(Sketcher.Constraint(
+                                "Coincident", base + i, 2, base + (i + 1) % n, 1))
+
+        # ── Add constraints
+        if add_constraints:
+            for con in add_constraints:
+                if isinstance(con, str):
+                    try:
+                        import json as _json
+                        con = _json.loads(con)
+                    except (ValueError, TypeError):
+                        continue
+                con_type = con.get("type", "")
+                if not con_type:
+                    continue
+
+                if "first" not in con and con_type not in ("Block",):
+                    warnings.append(f"Skipped {con_type}: missing 'first' index")
+                    continue
+
+                # Remove existing constraint that matches this one
+                # so the explicit constraint overwrites it.
+                first = con.get("first", -2000)
+                second = con.get("second", -2000)
+                for ci in range(sketch.ConstraintCount - 1, -1, -1):
+                    ec = sketch.Constraints[ci]
+                    if (ec.Type == con_type
+                            and ec.First == first
+                            and ec.Second == second):
+                        sketch.delConstraint(ci)
+                        break
+
+                args = [con_type]
+                for key in ("first", "first_pos", "second", "second_pos", "value"):
+                    if key in con:
+                        v = con[key]
+                        if key == "value":
+                            args.append(float(v))
+                        elif isinstance(v, float):
+                            args.append(int(v))
+                        else:
+                            args.append(v)
+
+                expr = con.get("expression")
+
+                try:
+                    ci = sketch.addConstraint(Sketcher.Constraint(*args))
+                    con_added += 1
+                    if expr:
+                        sketch.setExpression(f"Constraints[{ci}]", expr)
+                except Exception as e:
+                    warnings.append(f"Failed {con_type}: {e}")
+
+        if label:
+            sketch.Label = label
+
+        doc.recompute()
+
+        # ── Report constraint status
+        _DIMENSION_TYPES = {
+            "Distance", "DistanceX", "DistanceY", "Radius", "Angle",
+        }
+        constraint_details = []
+        try:
+            for ci in range(sketch.ConstraintCount):
+                c = sketch.Constraints[ci]
+                if c.Type in _DIMENSION_TYPES:
+                    constraint_details.append(
+                        f"Constraints[{ci}]: {c.Type} = {c.Value}  <- bindable"
+                    )
+                else:
+                    constraint_details.append(
+                        f"Constraints[{ci}]: {c.Type}"
+                    )
+        except Exception:
+            pass
+
+        status = ""
+        try:
+            if sketch.FullyConstrained:
+                status = " Fully constrained."
+            else:
+                dof = sketch.solve()
+                if dof > 0:
+                    status = f" Under-constrained ({dof} DOF remaining)."
+                elif dof < 0:
+                    status = " Over-constrained — remove redundant constraints."
+                else:
+                    status = " Fully constrained."
+        except Exception:
+            pass
+
+        warn_info = ""
+        if warnings:
+            warn_info = "\nWarnings: " + "; ".join(warnings)
+
+        constraint_info = ""
+        if constraint_details:
+            constraint_info = (
+                "\nConstraints:\n"
+                + "\n".join(f"  {d}" for d in constraint_details)
+            )
+
+        parts = []
+        if geo_added or geo_removed:
+            parts.append(f"geometry +{geo_added}/-{geo_removed}")
+        if con_added or con_removed:
+            parts.append(f"constraints +{con_added}/-{con_removed}")
+        changes = ", ".join(parts) if parts else "no changes"
+
+        return ToolResult(
+            success=True,
+            output=(f"Edited sketch '{sketch.Name}': {changes}. "
+                    f"Total: {sketch.GeometryCount} geometries, "
+                    f"{sketch.ConstraintCount} constraints.{status}"
+                    f"{constraint_info}{warn_info}"),
+            data={"name": sketch.Name,
+                  "geo_added": geo_added, "geo_removed": geo_removed,
+                  "con_added": con_added, "con_removed": con_removed,
+                  "geometry_count": sketch.GeometryCount,
+                  "constraint_count": sketch.ConstraintCount,
+                  "constraints": constraint_details,
+                  "fully_constrained": getattr(sketch, "FullyConstrained", None)},
+        )
+
+    return _with_undo("Edit Sketch", do)
+
+
+EDIT_SKETCH = ToolDefinition(
+    name="edit_sketch",
+    description=(
+        "Modify an existing sketch: add/remove geometry and constraints in one call. "
+        "Geometry types: line, circle, arc, rectangle, polygon (same format as create_sketch). "
+        "IMPORTANT: rectangles and circles auto-generate all necessary constraints "
+        "(Coincident, Horizontal, Vertical, DistanceX, DistanceY, Radius). "
+        "Do NOT add DistanceX/DistanceY/Radius constraints for rectangles or circles — "
+        "they are already constrained by the geometry coordinates and dimensions you provide. "
+        "Only add constraints for relationships BETWEEN geometries (e.g. Coincident to pin "
+        "a circle center to a rectangle edge). "
+        "COORDINATE SYSTEM: FreeCAD sketches use Y-up. When converting from SVG, images, "
+        "or screen coordinates (which use Y-down), negate all Y values. "
+        "BEST PRACTICE: To resize, move, or replace geometry, use clear_all=true and "
+        "provide the complete new geometry in add_geometries. This avoids over-constraint "
+        "issues. Incremental remove+add is error-prone because a rectangle is 4 lines "
+        "(indices 0-3) with 10 constraints, not a single object."
+    ),
+    category="modeling",
+    parameters=[
+        ToolParam("sketch_name", "string", "Name of the sketch to edit", required=True),
+        ToolParam("clear_all", "boolean",
+                  "Clear ALL existing geometry and constraints before adding new ones. "
+                  "Use this for resizing, repositioning, or replacing the sketch content. "
+                  "The sketch object (and its attachment plane/body) is preserved.",
+                  required=False, default=False),
+        ToolParam("add_geometries", "array",
+                  "Geometries to add. Same format as create_sketch: "
+                  "line: {type:'line',x1,y1,x2,y2}, "
+                  "rectangle: {type:'rectangle',x,y,width,height}, "
+                  "circle: {type:'circle',cx,cy,radius}, "
+                  "arc: {type:'arc',cx,cy,radius,start_angle,end_angle}, "
+                  "polygon: {type:'polygon',points:[[x,y],...]}.",
+                  required=False, items={"type": "object"}),
+        ToolParam("remove_geometries", "array",
+                  "Geometry indices to remove (0-based, highest-first).",
+                  required=False, items={"type": "integer"}),
+        ToolParam("add_constraints", "array",
+                  "Constraints to add. Each has 'type' plus: "
+                  "first (geometry index, required), first_pos (vertex: 1=start 2=end), "
+                  "second (2nd geometry index), second_pos, value (for dimensional). "
+                  "Optional 'expression' to bind dimensional value. "
+                  "Examples: "
+                  "{type:'Horizontal', first:0}, "
+                  "{type:'Coincident', first:0, first_pos:2, second:1, second_pos:1}, "
+                  "{type:'Distance', first:0, value:25.0}, "
+                  "{type:'DistanceX', first:0, first_pos:1, second:0, second_pos:2, value:40, expression:'Vars.width'}.",
+                  required=False, items={"type": "object"}),
+        ToolParam("remove_constraints", "array",
+                  "Constraint indices to remove (0-based, highest-first).",
+                  required=False, items={"type": "integer"}),
+        ToolParam("label", "string", "New label for the sketch", required=False, default=""),
+    ],
+    handler=_handle_edit_sketch,
 )
 
 
@@ -4395,6 +4731,7 @@ ALL_TOOLS = [
     CREATE_PRIMITIVE,
     CREATE_BODY,
     CREATE_SKETCH,
+    EDIT_SKETCH,
     PAD_SKETCH,
     POCKET_SKETCH,
     REVOLVE_SKETCH,

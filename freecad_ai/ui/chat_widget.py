@@ -2008,9 +2008,17 @@ class ChatDockWidget(QDockWidget):
         if not skill:
             return False
 
-        # Display the command
-        self.conversation.add_user_message(text)
-        self._append_html(render_message("user", text))
+        # Collect attachments (images/documents) from the strip and attach
+        # them to the visible user message, same as a regular send.
+        pending_images = self._attachment_strip.get_images() or None
+        pending_docs = self._attachment_strip.get_documents() or None
+
+        # Display the command (with any attachments)
+        self.conversation.add_user_message(text, images=pending_images,
+                                           documents=pending_docs)
+        display_content = self.conversation.messages[-1]["content"]
+        self._append_html(render_message("user", display_content))
+        self._attachment_strip.clear()
 
         # Execute the skill
         exec_result = registry.execute_skill(skill_name, args)
