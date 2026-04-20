@@ -115,13 +115,18 @@ class ToolRegistry:
                 success=False, output="", error=f"Tool {name} failed: {e}"
             )
 
-    def to_openai_schema(self) -> list[dict]:
-        """Convert all tools to OpenAI function calling format.
+    def to_openai_schema(self, filter_names: set[str] | None = None) -> list[dict]:
+        """Convert tools to OpenAI function calling format.
 
-        Resolves deferred parameters for all tools.
+        Resolves deferred parameters only for tools that will be emitted.
+        When ``filter_names`` is given, only tools whose name is in the
+        set are included — excluded tools skip the resolve step entirely,
+        which avoids unnecessary MCP schema fetches.
         """
         result = []
         for tool in self._tools.values():
+            if filter_names is not None and tool.name not in filter_names:
+                continue
             tool.resolve_params()
             result.append({
                 "type": "function",
@@ -133,13 +138,16 @@ class ToolRegistry:
             })
         return result
 
-    def to_anthropic_schema(self) -> list[dict]:
-        """Convert all tools to Anthropic tool_use format.
+    def to_anthropic_schema(self, filter_names: set[str] | None = None) -> list[dict]:
+        """Convert tools to Anthropic tool_use format.
 
-        Resolves deferred parameters for all tools.
+        Resolves deferred parameters only for tools that will be emitted.
+        See :meth:`to_openai_schema` for details on ``filter_names``.
         """
         result = []
         for tool in self._tools.values():
+            if filter_names is not None and tool.name not in filter_names:
+                continue
             tool.resolve_params()
             result.append({
                 "name": tool.name,
@@ -148,13 +156,16 @@ class ToolRegistry:
             })
         return result
 
-    def to_mcp_schema(self) -> list[dict]:
-        """Convert all tools to MCP tools/list format.
+    def to_mcp_schema(self, filter_names: set[str] | None = None) -> list[dict]:
+        """Convert tools to MCP tools/list format.
 
-        Resolves deferred parameters for all tools.
+        Resolves deferred parameters only for tools that will be emitted.
+        See :meth:`to_openai_schema` for details on ``filter_names``.
         """
         result = []
         for t in self._tools.values():
+            if filter_names is not None and t.name not in filter_names:
+                continue
             t.resolve_params()
             result.append({
                 "name": t.name,
@@ -162,6 +173,14 @@ class ToolRegistry:
                 "inputSchema": _params_to_json_schema(t.parameters),
             })
         return result
+
+    def list_name_description_pairs(self) -> list[tuple[str, str]]:
+        """List (name, description) pairs without resolving deferred params.
+
+        Used by the reranker — it needs only names and descriptions, which
+        are always populated, even for MCP tools with lazy schemas.
+        """
+        return [(t.name, t.description) for t in self._tools.values()]
 
 
 def _params_to_json_schema(params: list[ToolParam]) -> dict:

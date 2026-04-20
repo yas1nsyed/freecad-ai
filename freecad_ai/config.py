@@ -71,6 +71,22 @@ class AppConfig:
     vision_detected: bool | None = None   # None=not tested, True/False=probe result
     vision_override: bool | None = None   # user manual override, takes precedence
 
+    # Tool reranking — when active, only the top-N most relevant tools
+    # (plus pinned tools) are sent to the LLM on each user turn. Saves
+    # prompt tokens when many tools are registered.
+    # "off" = disabled, "keyword" = IDF-weighted token match (free, fast),
+    # "llm" = semantic ranking via a small/fast LLM (better filter quality).
+    rerank_method: str = "off"
+    rerank_top_n: int = 15
+    rerank_pinned_tools: list = field(default_factory=list)
+    # LLM reranker provider override. Empty = inherit from main provider.
+    # Lets users run reranking through a cheap/local model (e.g. Ollama)
+    # while the main chat uses an expensive cloud model.
+    rerank_llm_provider_name: str = ""
+    rerank_llm_base_url: str = ""
+    rerank_llm_api_key: str = ""
+    rerank_llm_model: str = ""
+
     @property
     def supports_vision(self) -> bool:
         """Whether the current LLM supports vision (images in content blocks)."""

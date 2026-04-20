@@ -78,6 +78,115 @@ def _is_binary_content(data: bytes) -> bool:
     return False
 
 
+def _build_rerank_llm_client(cfg):
+    """Construct the LLMClient used for LLM-based reranking.
+
+    Each override field is inherited from the main provider when empty,
+    so the common case (same provider, maybe a different model) is a
+    one-field change. Full override (different provider entirely) works
+    too, for e.g. running reranking on a local Ollama model while the
+    main chat uses a cloud provider.
+
+    When the model is inherited from the main config, we also inherit
+    the main config's ``model_params`` for that model — this carries
+    provider-specific constraints like Moonshot/Kimi's locked
+    ``temperature=1``. Without this, a forced ``temperature=0.0`` would
+    be rejected with HTTP 400 by those providers.
+    """
+    from ..llm.client import LLMClient
+    provider_name = cfg.rerank_llm_provider_name or cfg.provider.name
+    base_url = cfg.rerank_llm_base_url or cfg.provider.base_url
+    api_key = cfg.rerank_llm_api_key or cfg.provider.api_key
+    model = cfg.rerank_llm_model or cfg.provider.model
+
+    # Inherit model_params when the reranker shares the main model.
+    # Otherwise the reranker picks its own (determinism-first) defaults
+    # and has no way to know about provider quirks for a user-chosen
+    # override model.
+    inheriting_model = not cfg.rerank_llm_model
+    model_params = (
+        dict(cfg.model_params.get(model, {})) if inheriting_model else {}
+    )
+
+    return LLMClient(
+        provider_name=provider_name,
+        base_url=base_url,
+        api_key=api_key,
+        model=model,
+        max_tokens=1024,
+        temperature=model_params.get("temperature", 0.0),
+        thinking="off",
+        model_params=model_params,
+    )
+
+
+def _freecad_log(msg: str):
+    """Print a line to FreeCAD's Report View, if FreeCAD is available."""
+    try:
+        import FreeCAD as _App
+        _App.Console.PrintMessage("[FreeCAD AI] {}\n".format(msg))
+    except Exception:
+        pass
+
+
+def _run_reranker(cfg, pairs, user_text):
+    """Dispatch to the configured reranker method.
+
+    Returns a list of tool names to include. LLM method falls back to
+    keyword on any failure (handled inside ``rerank_tools_llm``).
+    """
+    from ..tools.reranker import rerank_tools, rerank_tools_llm
+    if cfg.rerank_method == "llm":
+        try:
+            client = _build_rerank_llm_client(cfg)
+        except Exception as e:
+            _freecad_log("LLM reranker: cannot build client ({}); using keyword".format(e))
+            return rerank_tools(
+                pairs, user_text,
+                top_n=cfg.rerank_top_n,
+                pinned=cfg.rerank_pinned_tools,
+            )
+        return rerank_tools_llm(
+            pairs, user_text,
+            top_n=cfg.rerank_top_n,
+            pinned=cfg.rerank_pinned_tools,
+            llm_client=client,
+            report=_freecad_log,
+        )
+    return rerank_tools(
+        pairs, user_text,
+        top_n=cfg.rerank_top_n,
+        pinned=cfg.rerank_pinned_tools,
+    )
+
+
+def _extract_latest_user_text(conversation) -> str:
+    """Return the text of the most recent user-authored message.
+
+    Skips "[System] ..." synthetic messages injected by the framework —
+    those contain tool/execution chatter, not user intent.
+    Handles both plain string content and the block-list form used when
+    images or documents are attached.
+    """
+    for msg in reversed(conversation.messages):
+        if msg.get("role") != "user":
+            continue
+        content = msg.get("content")
+        if isinstance(content, str):
+            if content.startswith("[System] "):
+                continue
+            return content
+        if isinstance(content, list):
+            parts = [
+                b.get("text", "") for b in content
+                if isinstance(b, dict) and b.get("type") == "text"
+            ]
+            joined = "\n".join(p for p in parts if p).strip()
+            if joined and not joined.startswith("[System] "):
+                return joined
+    return ""
+
+
 # ── LLM Worker Thread ───────────────────────────────────────
 
 class _LLMWorker(QThread):
@@ -1429,10 +1538,29 @@ class ChatDockWidget(QDockWidget):
                 self._vision_fallback_tool = find_vision_fallback(self._tool_registry)
                 self._refresh_image_controls()
             api_style = get_api_style(cfg.provider.name)
+
+            # Optional tool reranking: filter schemas down to the top-N
+            # relevant tools (+ pinned) based on the latest user message.
+            filter_names = None
+            if cfg.rerank_method in ("keyword", "llm"):
+                user_text = _extract_latest_user_text(self.conversation)
+                pairs = self._tool_registry.list_name_description_pairs()
+                ranked = _run_reranker(cfg, pairs, user_text)
+                filter_names = set(ranked)
+                try:
+                    import FreeCAD as _App
+                    _App.Console.PrintMessage(
+                        "[FreeCAD AI] Reranker ({}): {} of {} tools -> {}\n".format(
+                            cfg.rerank_method, len(ranked), len(pairs),
+                            ", ".join(ranked))
+                    )
+                except Exception:
+                    pass
+
             if api_style == "anthropic":
-                tools_schema = self._tool_registry.to_anthropic_schema()
+                tools_schema = self._tool_registry.to_anthropic_schema(filter_names)
             else:
-                tools_schema = self._tool_registry.to_openai_schema()
+                tools_schema = self._tool_registry.to_openai_schema(filter_names)
             system_prompt = build_system_prompt(
                 mode=mode, tools_enabled=True,
                 override=cfg.system_prompt_override)

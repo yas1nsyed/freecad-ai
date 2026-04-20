@@ -339,6 +339,89 @@ class SettingsDialog(QDialog):
         behavior_group.setLayout(behavior_layout)
         layout.addWidget(behavior_group)
 
+        # Tool Reranking group
+        rerank_group = QGroupBox(translate("SettingsDialog", "Tool Reranking"))
+        rerank_layout = QVBoxLayout()
+
+        method_layout = QHBoxLayout()
+        method_layout.addWidget(QLabel(translate("SettingsDialog", "Method:")))
+        self.rerank_method_combo = QComboBox()
+        self.rerank_method_combo.addItems([
+            translate("SettingsDialog", "Off"),
+            translate("SettingsDialog", "Keyword (free, lexical)"),
+            translate("SettingsDialog", "LLM (semantic)"),
+        ])
+        self.rerank_method_combo.setToolTip(
+            translate("SettingsDialog",
+                      "Off: send all tool schemas every turn\n"
+                      "Keyword: IDF-weighted token match, no extra LLM call\n"
+                      "LLM: semantic ranking via a small/fast LLM\n"
+                      "Both keyword and LLM include pinned tools unconditionally.")
+        )
+        self.rerank_method_combo.currentIndexChanged.connect(
+            self._on_rerank_method_changed)
+        method_layout.addWidget(self.rerank_method_combo)
+        method_layout.addStretch()
+        rerank_layout.addLayout(method_layout)
+
+        top_n_layout = QHBoxLayout()
+        top_n_layout.addWidget(QLabel(translate("SettingsDialog", "Top N:")))
+        self.rerank_top_n_spin = QSpinBox()
+        self.rerank_top_n_spin.setRange(1, 200)
+        self.rerank_top_n_spin.setValue(15)
+        top_n_layout.addWidget(self.rerank_top_n_spin)
+        top_n_layout.addStretch()
+        rerank_layout.addLayout(top_n_layout)
+
+        pinned_layout = QHBoxLayout()
+        pinned_layout.addWidget(QLabel(translate("SettingsDialog", "Pinned tools:")))
+        self.rerank_pinned_edit = QLineEdit()
+        self.rerank_pinned_edit.setPlaceholderText(
+            translate("SettingsDialog",
+                      "comma-separated tool names, always included")
+        )
+        pinned_layout.addWidget(self.rerank_pinned_edit)
+        rerank_layout.addLayout(pinned_layout)
+
+        # LLM reranker provider override — only relevant when method == "llm".
+        # Fields left empty inherit the main provider's settings.
+        self.rerank_llm_group = QGroupBox(
+            translate("SettingsDialog", "LLM reranker provider (empty = same as main)"))
+        llm_form = QFormLayout()
+
+        self.rerank_llm_provider_combo = QComboBox()
+        self.rerank_llm_provider_combo.addItem(
+            translate("SettingsDialog", "(same as main)"), "")
+        for name in get_provider_names():
+            self.rerank_llm_provider_combo.addItem(name.capitalize(), name)
+        llm_form.addRow(translate("SettingsDialog", "Provider:"),
+                        self.rerank_llm_provider_combo)
+
+        self.rerank_llm_base_url_edit = QLineEdit()
+        self.rerank_llm_base_url_edit.setPlaceholderText(
+            translate("SettingsDialog", "inherit from main"))
+        llm_form.addRow(translate("SettingsDialog", "Base URL:"),
+                        self.rerank_llm_base_url_edit)
+
+        self.rerank_llm_api_key_edit = QLineEdit()
+        self.rerank_llm_api_key_edit.setEchoMode(QLineEdit.Password)
+        self.rerank_llm_api_key_edit.setPlaceholderText(
+            translate("SettingsDialog", "inherit from main"))
+        llm_form.addRow(translate("SettingsDialog", "API key:"),
+                        self.rerank_llm_api_key_edit)
+
+        self.rerank_llm_model_edit = QLineEdit()
+        self.rerank_llm_model_edit.setPlaceholderText(
+            translate("SettingsDialog", "inherit from main"))
+        llm_form.addRow(translate("SettingsDialog", "Model:"),
+                        self.rerank_llm_model_edit)
+
+        self.rerank_llm_group.setLayout(llm_form)
+        rerank_layout.addWidget(self.rerank_llm_group)
+
+        rerank_group.setLayout(rerank_layout)
+        layout.addWidget(rerank_group)
+
         # MCP Servers group
         mcp_group = QGroupBox(translate("SettingsDialog", "MCP Servers"))
         mcp_layout = QVBoxLayout()
@@ -508,6 +591,25 @@ class SettingsDialog(QDialog):
 
         self.enable_tools_check.setChecked(cfg.enable_tools)
         self.auto_execute_check.setChecked(cfg.auto_execute)
+
+        # Tool reranking
+        method_map = {"off": 0, "keyword": 1, "llm": 2}
+        self.rerank_method_combo.setCurrentIndex(
+            method_map.get(cfg.rerank_method, 0))
+        self.rerank_top_n_spin.setValue(cfg.rerank_top_n)
+        self.rerank_pinned_edit.setText(", ".join(cfg.rerank_pinned_tools))
+
+        # LLM reranker provider override
+        provider_idx = self.rerank_llm_provider_combo.findData(
+            cfg.rerank_llm_provider_name)
+        if provider_idx >= 0:
+            self.rerank_llm_provider_combo.setCurrentIndex(provider_idx)
+        else:
+            self.rerank_llm_provider_combo.setCurrentIndex(0)
+        self.rerank_llm_base_url_edit.setText(cfg.rerank_llm_base_url)
+        self.rerank_llm_api_key_edit.setText(cfg.rerank_llm_api_key)
+        self.rerank_llm_model_edit.setText(cfg.rerank_llm_model)
+        self._on_rerank_method_changed(self.rerank_method_combo.currentIndex())
 
         thinking_map = {"off": 0, "on": 1, "extended": 2}
         self.thinking_combo.setCurrentIndex(thinking_map.get(cfg.thinking, 0))
@@ -766,8 +868,28 @@ class SettingsDialog(QDialog):
         cfg.mcp_servers = list(self._mcp_configs) if hasattr(self, "_mcp_configs") else []
         cfg.scan_freecad_macros = self.scan_macros_cb.isChecked()
 
+        # Tool reranking
+        method_values = ["off", "keyword", "llm"]
+        cfg.rerank_method = method_values[self.rerank_method_combo.currentIndex()]
+        cfg.rerank_top_n = self.rerank_top_n_spin.value()
+        pinned_text = self.rerank_pinned_edit.text().strip()
+        cfg.rerank_pinned_tools = [
+            s.strip() for s in pinned_text.split(",") if s.strip()
+        ] if pinned_text else []
+
+        # LLM reranker provider override
+        cfg.rerank_llm_provider_name = (
+            self.rerank_llm_provider_combo.currentData() or "")
+        cfg.rerank_llm_base_url = self.rerank_llm_base_url_edit.text().strip()
+        cfg.rerank_llm_api_key = self.rerank_llm_api_key_edit.text().strip()
+        cfg.rerank_llm_model = self.rerank_llm_model_edit.text().strip()
+
         save_current_config()
         self.accept()
+
+    def _on_rerank_method_changed(self, index: int):
+        """Show the LLM provider subgroup only when 'LLM' is selected."""
+        self.rerank_llm_group.setVisible(index == 2)
 
     def _test_connection(self):
         """Test the LLM connection in a background thread."""
