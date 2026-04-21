@@ -65,6 +65,108 @@ class _TestConnectionThread(QThread):
             self.finished.emit(False, str(e))
 
 
+class _TestRerankerThread(QThread):
+    """Background thread for testing the LLM reranker with current dialog values.
+
+    Takes provider/URL/key/model/model_params as arguments rather than
+    reading config — so the user can test before saving.
+    """
+    finished = Signal(bool, str)  # success, message
+
+    def __init__(self, provider_name, base_url, api_key, model,
+                 model_params, parent=None):
+        super().__init__(parent)
+        self._provider = provider_name
+        self._base_url = base_url
+        self._api_key = api_key
+        self._model = model
+        self._model_params = dict(model_params or {})
+
+    def run(self):
+        try:
+            from ..llm.client import LLMClient
+            from ..tools.reranker import rerank_tools_llm
+            client = LLMClient(
+                provider_name=self._provider,
+                base_url=self._base_url,
+                api_key=self._api_key,
+                model=self._model,
+                max_tokens=1024,
+                temperature=self._model_params.get("temperature", 0.0),
+                thinking="off",
+                model_params=self._model_params,
+            )
+            # Small canonical probe set — if reranker is working, the LLM
+            # should trivially pick create_sketch and pad_sketch.
+            sample = [
+                ("create_sketch", "Create a new sketch with geometry"),
+                ("pad_sketch", "Extrude a sketch into a solid pad"),
+                ("fillet_edges", "Round selected edges with a fillet"),
+                ("list_objects", "List all objects in the active document"),
+                ("export_stl", "Export an object as an STL mesh file"),
+            ]
+            messages = []
+
+            def report(m):
+                messages.append(m)
+
+            result = rerank_tools_llm(
+                sample, "extrude a new sketch into a solid",
+                top_n=2, llm_client=client, report=report,
+            )
+            # Look for explicit failure markers in the diagnostic stream
+            failure = next(
+                (m for m in messages if "call failed" in m),
+                None,
+            )
+            if failure:
+                self.finished.emit(False, failure)
+                return
+
+            # Extract the parsed-count and raw-response lines for the report
+            parsed_count = 0
+            raw_preview = ""
+            for m in messages:
+                if "parsed" in m and "valid names" in m:
+                    # Format: "LLM reranker: parsed N valid names ..."
+                    for tok in m.split():
+                        if tok.isdigit():
+                            parsed_count = int(tok)
+                            break
+                if "raw response" in m:
+                    raw_preview = m
+
+            # An LLM that returned zero valid names (all slots filled by
+            # keyword top-up) is effectively not working, even though the
+            # HTTP call succeeded. Flag it as an error so the user knows
+            # the reranker is doing nothing useful.
+            if parsed_count == 0:
+                detail = (
+                    "LLM returned 0 valid tool names — all picks came from "
+                    "keyword fallback. The LLM is responding but not "
+                    "producing usable output for reranking. "
+                    "Try a more capable or better-suited model."
+                )
+                if raw_preview:
+                    detail += "\n" + raw_preview
+                self.finished.emit(False, detail)
+                return
+
+            # Partial success: some names from LLM, rest from top-up.
+            # Still a green light — LLM is contributing, just not fully.
+            topup_count = len(result) - parsed_count
+            detail = "Picked: {}".format(", ".join(result))
+            detail += " ({} from LLM".format(parsed_count)
+            if topup_count > 0:
+                detail += ", {} from keyword top-up".format(topup_count)
+            detail += ")"
+            if raw_preview:
+                detail += "\n" + raw_preview
+            self.finished.emit(True, detail)
+        except Exception as e:
+            self.finished.emit(False, "{}: {}".format(type(e).__name__, e))
+
+
 class SettingsDialog(QDialog):
     """Configuration dialog for FreeCAD AI."""
 
@@ -76,6 +178,11 @@ class SettingsDialog(QDialog):
         self.resize(540, 700)
         self._test_thread = None
         self._last_default_prompt = ""
+        # Unsaved reranker params, keyed by model name. Survives renaming
+        # the override model within one dialog session so the user doesn't
+        # lose typed-but-not-saved params.
+        self._rerank_pending_params: dict[str, dict] = {}
+        self._rerank_last_model = ""
         self._build_ui()
         self._load_from_config()
 
@@ -413,8 +520,79 @@ class SettingsDialog(QDialog):
         self.rerank_llm_model_edit = QLineEdit()
         self.rerank_llm_model_edit.setPlaceholderText(
             translate("SettingsDialog", "inherit from main"))
+        # textChanged fires on every keystroke, so toggling between
+        # inherit/override updates the params table live — users who type
+        # a model and click Save immediately still see the right table.
+        self.rerank_llm_model_edit.textChanged.connect(
+            self._on_rerank_model_changed)
         llm_form.addRow(translate("SettingsDialog", "Model:"),
                         self.rerank_llm_model_edit)
+
+        # Per-model parameters for the reranker's effective model. Written
+        # back into the shared cfg.model_params dict so a given model's
+        # params are consistent whether the model is used as main, reranker,
+        # or both. When the reranker inherits the main model (override
+        # field empty), the table is prefilled with the main model's
+        # current params and locked read-only — edits belong on the main
+        # Model Parameters table. When an override model is set, the table
+        # is editable and writes to that model's slot in model_params.
+        self._rerank_params_label = QLabel()
+        llm_form.addRow(self._rerank_params_label)
+
+        self.rerank_params_table = QTableWidget(0, 2)
+        self.rerank_params_table.setHorizontalHeaderLabels([
+            translate("SettingsDialog", "Parameter"),
+            translate("SettingsDialog", "Value"),
+        ])
+        self.rerank_params_table.horizontalHeader().setStretchLastSection(True)
+        self.rerank_params_table.horizontalHeader().setSectionResizeMode(
+            0, QHeaderView.Interactive)
+        self.rerank_params_table.setColumnWidth(0, 160)
+        self.rerank_params_table.setMaximumHeight(120)
+        self.rerank_params_table.setToolTip(
+            translate("SettingsDialog",
+                      "Parameters for the reranker's model. Merged into the\n"
+                      "API request body just like main model parameters.\n"
+                      "Common: temperature, top_p, top_k, num_predict."))
+        llm_form.addRow(self.rerank_params_table)
+
+        rp_btn_layout = QHBoxLayout()
+        self._rerank_add_btn = QPushButton(translate("SettingsDialog", "Add"))
+        self._rerank_add_btn.clicked.connect(self._add_rerank_param)
+        rp_btn_layout.addWidget(self._rerank_add_btn)
+
+        self._rerank_remove_btn = QPushButton(translate("SettingsDialog", "Remove"))
+        self._rerank_remove_btn.clicked.connect(self._remove_rerank_param)
+        rp_btn_layout.addWidget(self._rerank_remove_btn)
+
+        self._rerank_defaults_btn = QPushButton(translate("SettingsDialog", "Load Defaults"))
+        self._rerank_defaults_btn.setToolTip(
+            translate("SettingsDialog",
+                      "Load recommended parameters for the reranker's provider"))
+        self._rerank_defaults_btn.clicked.connect(self._load_rerank_default_params)
+        rp_btn_layout.addWidget(self._rerank_defaults_btn)
+        rp_btn_layout.addStretch()
+        llm_form.addRow(rp_btn_layout)
+
+        # Test button — validates the reranker call without waiting for the
+        # user to send a message. Uses current dialog values, not disk, so
+        # the user can iterate on params before saving.
+        test_layout = QHBoxLayout()
+        self._rerank_test_btn = QPushButton(
+            translate("SettingsDialog", "Test Reranker"))
+        self._rerank_test_btn.setToolTip(
+            translate("SettingsDialog",
+                      "Send a small test prompt to the reranker LLM using the\n"
+                      "current dialog settings. Reports success or the exact\n"
+                      "error from the provider — useful for diagnosing 4xx\n"
+                      "errors, timeouts, or unparseable responses."))
+        self._rerank_test_btn.clicked.connect(self._test_reranker)
+        test_layout.addWidget(self._rerank_test_btn)
+        self._rerank_test_status = QLabel()
+        self._rerank_test_status.setWordWrap(True)
+        self._rerank_test_status.setStyleSheet("color: #666;")
+        test_layout.addWidget(self._rerank_test_status, 1)
+        llm_form.addRow(test_layout)
 
         self.rerank_llm_group.setLayout(llm_form)
         rerank_layout.addWidget(self.rerank_llm_group)
@@ -609,6 +787,10 @@ class SettingsDialog(QDialog):
         self.rerank_llm_base_url_edit.setText(cfg.rerank_llm_base_url)
         self.rerank_llm_api_key_edit.setText(cfg.rerank_llm_api_key)
         self.rerank_llm_model_edit.setText(cfg.rerank_llm_model)
+        # Reset pending edits from any previous dialog open
+        self._rerank_pending_params = {}
+        self._rerank_last_model = ""
+        self._on_rerank_model_changed()
         self._on_rerank_method_changed(self.rerank_method_combo.currentIndex())
 
         thinking_map = {"off": 0, "on": 1, "extended": 2}
@@ -882,7 +1064,30 @@ class SettingsDialog(QDialog):
             self.rerank_llm_provider_combo.currentData() or "")
         cfg.rerank_llm_base_url = self.rerank_llm_base_url_edit.text().strip()
         cfg.rerank_llm_api_key = self.rerank_llm_api_key_edit.text().strip()
-        cfg.rerank_llm_model = self.rerank_llm_model_edit.text().strip()
+        rerank_model = self.rerank_llm_model_edit.text().strip()
+        cfg.rerank_llm_model = rerank_model
+
+        # Save the reranker params table into cfg.model_params, keyed by
+        # the effective model name. When inheriting, that's the main model
+        # — edits in the reranker table propagate to the main model's
+        # entry (last-save-wins against the main table, which already
+        # wrote above). When overriding, it's the override model's slot.
+        effective_model = rerank_model or cfg.provider.model
+        rerank_params = self._read_rerank_params_table()
+        if rerank_params:
+            cfg.model_params[effective_model] = rerank_params
+
+        # Also persist any pending params for other override models that
+        # were edited earlier in this dialog session (before the user
+        # renamed the override field). Empty tables clear the slot, but
+        # never for the main model — the main table owns that.
+        for model_name, params in self._rerank_pending_params.items():
+            if model_name == effective_model:
+                continue  # already handled above
+            if params:
+                cfg.model_params[model_name] = params
+            elif model_name in cfg.model_params and model_name != cfg.provider.model:
+                del cfg.model_params[model_name]
 
         save_current_config()
         self.accept()
@@ -890,6 +1095,166 @@ class SettingsDialog(QDialog):
     def _on_rerank_method_changed(self, index: int):
         """Show the LLM provider subgroup only when 'LLM' is selected."""
         self.rerank_llm_group.setVisible(index == 2)
+
+    def _on_rerank_model_changed(self, *_args):
+        """Refresh the reranker params table for the current model state.
+
+        - Empty override → prefill with the main Model Parameters table's
+          *live* values, lock the table read-only, and disable buttons.
+          Edits belong on the main table.
+        - Non-empty override → populate with pending/saved/default params
+          for that specific model, enable editing.
+        """
+        cfg = get_config()
+        prev_model = getattr(self, "_rerank_last_model", "") or ""
+        model = self.rerank_llm_model_edit.text().strip()
+
+        # Persist unsaved edits under the previous (override) model name
+        # so typing a fresh override name doesn't drop them. We only stash
+        # when the previous state was editable (override mode).
+        if prev_model:
+            self._rerank_pending_params[prev_model] = self._read_rerank_params_table()
+
+        self._rerank_last_model = model
+        inheriting = not model
+
+        if inheriting:
+            # Show live values from the main params table (not disk) —
+            # reflects in-dialog edits the user may have just made there.
+            # Stays editable: changes write to the main model's slot in
+            # cfg.model_params (shared with the main table).
+            params = self._read_model_params_table()
+            self._populate_rerank_params_table(params)
+            self._rerank_params_label.setText(translate(
+                "SettingsDialog",
+                "Model parameters (inheriting main model — edits also apply to main):"))
+            return
+
+        # Override model: pending edits win, then saved, then provider defaults
+        if model in self._rerank_pending_params:
+            params = self._rerank_pending_params[model]
+        else:
+            params = dict(cfg.model_params.get(model, {}))
+        if not params:
+            provider_name = (
+                self.rerank_llm_provider_combo.currentData()
+                or cfg.provider.name
+            )
+            preset = PROVIDER_PRESETS.get(provider_name, {})
+            params = dict(preset.get("default_params", {}))
+        self._populate_rerank_params_table(params)
+        self._rerank_params_label.setText(translate(
+            "SettingsDialog", "Model parameters (reranker override):"))
+
+    def _populate_rerank_params_table(self, params: dict):
+        self.rerank_params_table.setRowCount(0)
+        for key, value in params.items():
+            row = self.rerank_params_table.rowCount()
+            self.rerank_params_table.insertRow(row)
+            self.rerank_params_table.setItem(row, 0, QTableWidgetItem(str(key)))
+            self.rerank_params_table.setItem(row, 1, QTableWidgetItem(str(value)))
+
+    def _read_rerank_params_table(self) -> dict:
+        params = {}
+        for row in range(self.rerank_params_table.rowCount()):
+            key_item = self.rerank_params_table.item(row, 0)
+            val_item = self.rerank_params_table.item(row, 1)
+            if not key_item or not val_item:
+                continue
+            key = key_item.text().strip()
+            val_str = val_item.text().strip()
+            if not key:
+                continue
+            try:
+                if "." in val_str or "e" in val_str.lower():
+                    params[key] = float(val_str)
+                else:
+                    params[key] = int(val_str)
+            except ValueError:
+                if val_str.lower() in ("true", "false"):
+                    params[key] = val_str.lower() == "true"
+                else:
+                    params[key] = val_str
+        return params
+
+    def _add_rerank_param(self):
+        row = self.rerank_params_table.rowCount()
+        self.rerank_params_table.insertRow(row)
+        self.rerank_params_table.setItem(row, 0, QTableWidgetItem(""))
+        self.rerank_params_table.setItem(row, 1, QTableWidgetItem(""))
+        self.rerank_params_table.editItem(self.rerank_params_table.item(row, 0))
+
+    def _remove_rerank_param(self):
+        row = self.rerank_params_table.currentRow()
+        if row >= 0:
+            self.rerank_params_table.removeRow(row)
+
+    def _test_reranker(self):
+        """Send a small probe prompt to the reranker LLM using dialog values.
+
+        Surfaces success or the exact error so the user can debug a broken
+        reranker config (HTTP 4xx, auth failure, timeouts, hallucinations)
+        without sending a real chat message and parsing the Report View.
+        """
+        # Resolve effective provider/URL/key/model from dialog state.
+        # Empty fields inherit from the main fields (same as runtime behavior).
+        provider = (self.rerank_llm_provider_combo.currentData() or "").strip()
+        if not provider:
+            names = get_provider_names()
+            idx = self.provider_combo.currentIndex()
+            provider = names[idx] if 0 <= idx < len(names) else ""
+
+        base_url = self.rerank_llm_base_url_edit.text().strip() \
+            or self.base_url_edit.text().strip()
+        api_key = self.rerank_llm_api_key_edit.text().strip() \
+            or self.api_key_edit.text().strip()
+        model = self.rerank_llm_model_edit.text().strip() \
+            or self.model_edit.text().strip()
+        # Effective params: use the reranker table (reflects current state
+        # for both inherit and override modes).
+        model_params = self._read_rerank_params_table()
+
+        if not model:
+            self._rerank_test_status.setText(translate(
+                "SettingsDialog", "No model configured"))
+            self._rerank_test_status.setStyleSheet("color: #c62828;")
+            return
+
+        self._rerank_test_btn.setEnabled(False)
+        self._rerank_test_status.setText(translate(
+            "SettingsDialog", "Testing..."))
+        self._rerank_test_status.setStyleSheet("color: #666;")
+
+        self._rerank_test_thread = _TestRerankerThread(
+            provider, base_url, api_key, model, model_params, self,
+        )
+        self._rerank_test_thread.finished.connect(
+            self._on_rerank_test_finished)
+        self._rerank_test_thread.start()
+
+    def _on_rerank_test_finished(self, success: bool, message: str):
+        """Render the reranker test outcome in the status label."""
+        self._rerank_test_btn.setEnabled(True)
+        if success:
+            self._rerank_test_status.setText(
+                translate("SettingsDialog", "OK") + " — " + message)
+            self._rerank_test_status.setStyleSheet("color: #2e7d32;")
+        else:
+            self._rerank_test_status.setText(
+                translate("SettingsDialog", "Error") + ": " + message)
+            self._rerank_test_status.setStyleSheet("color: #c62828;")
+
+    def _load_rerank_default_params(self):
+        """Reset the reranker params table to the reranker provider's defaults."""
+        provider_name = (
+            self.rerank_llm_provider_combo.currentData()
+            or get_config().provider.name
+        )
+        preset = PROVIDER_PRESETS.get(provider_name, {})
+        params = dict(preset.get("default_params", {}))
+        if not params:
+            params = {"temperature": 0.3}
+        self._populate_rerank_params_table(params)
 
     def _test_connection(self):
         """Test the LLM connection in a background thread."""

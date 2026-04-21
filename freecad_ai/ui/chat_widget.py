@@ -87,11 +87,14 @@ def _build_rerank_llm_client(cfg):
     too, for e.g. running reranking on a local Ollama model while the
     main chat uses a cloud provider.
 
-    When the model is inherited from the main config, we also inherit
-    the main config's ``model_params`` for that model — this carries
-    provider-specific constraints like Moonshot/Kimi's locked
-    ``temperature=1``. Without this, a forced ``temperature=0.0`` would
-    be rejected with HTTP 400 by those providers.
+    Model params for the reranker's effective model are always sourced
+    from the shared ``cfg.model_params`` dict, keyed by model name.
+    This means:
+      - Inherited model → same params as main chat (handles provider
+        quirks like Moonshot's locked ``temperature=1``)
+      - Override model → params configured via the reranker's inline
+        params table in Settings (important for small Ollama models
+        that need ``num_predict`` / ``top_k`` / ``repeat_penalty`` etc.)
     """
     from ..llm.client import LLMClient
     provider_name = cfg.rerank_llm_provider_name or cfg.provider.name
@@ -99,14 +102,9 @@ def _build_rerank_llm_client(cfg):
     api_key = cfg.rerank_llm_api_key or cfg.provider.api_key
     model = cfg.rerank_llm_model or cfg.provider.model
 
-    # Inherit model_params when the reranker shares the main model.
-    # Otherwise the reranker picks its own (determinism-first) defaults
-    # and has no way to know about provider quirks for a user-chosen
-    # override model.
-    inheriting_model = not cfg.rerank_llm_model
-    model_params = (
-        dict(cfg.model_params.get(model, {})) if inheriting_model else {}
-    )
+    # Always look up params for the effective model — sharing the main
+    # model_params dict keeps params coherent across main/reranker usage.
+    model_params = dict(cfg.model_params.get(model, {}))
 
     return LLMClient(
         provider_name=provider_name,
