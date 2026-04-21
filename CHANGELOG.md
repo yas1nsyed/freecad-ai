@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.10.0-alpha] - 2026-04-21
+
+Tool reranking — keyword and LLM-based filtering to keep the tool-schema token footprint small when many tools are registered.
+
 ### Added
 
 - **Tool reranking** — opt-in per-turn filter that sends only the top-N most relevant tools to the LLM, plus a user-configured pinned set. Two methods available in Settings:
