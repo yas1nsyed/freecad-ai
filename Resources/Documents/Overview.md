@@ -6,10 +6,13 @@ An AI-powered assistant workbench for FreeCAD that creates and modifies
 ## Features
 
 - Chat interface with streaming LLM responses
-- 21 structured tools for safe, undo-wrapped modeling operations
-- Skills system with reusable `/commands` (enclosure, gear, fastener holes, etc.)
-- Multiple LLM providers: Anthropic, OpenAI, Ollama, Gemini, OpenRouter
+- 50 structured tools for safe, undo-wrapped modeling operations
+- Optional tool reranking (keyword or LLM-based) to filter tools sent to the LLM per turn
+- Skills system with reusable `/commands` (enclosure, gear, fastener holes, sketch-from-image, etc.)
+- MCP integration — connect external Model Context Protocol servers to extend available tools
+- 20+ LLM providers: Anthropic, OpenAI, Ollama, Gemini, OpenRouter, and more
 - Thinking mode for complex multi-step reasoning
+- File attachments (images, text, PDFs via hooks)
 - Zero external dependencies
 
 ## Requirements

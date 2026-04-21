@@ -7,6 +7,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- **Tool reranking** — opt-in per-turn filter that sends only the top-N most relevant tools to the LLM, plus a user-configured pinned set. Two methods available in Settings:
+  - **Keyword** — pure-Python IDF-weighted token match. Zero extra LLM call, zero latency, lexical-only filtering.
+  - **LLM** — semantic ranking via a small/fast LLM (same provider as main by default, or a full provider override for e.g. running reranking on a local Ollama model while the main chat uses a cloud provider). Hallucinated tool names are dropped; slots not filled by the LLM are topped up from the keyword reranker so the filter set is never under-sized.
+- **Test Reranker button** in Settings — sends a canonical probe to the reranker LLM with current dialog values (no save needed) and displays success (with LLM-vs-top-up breakdown) or the exact provider error.
+- **Diagnostic logging for reranking** — each LLM-reranker call prints its decision points (candidates sent, raw response preview, parsed count, top-up fired) to FreeCAD's Report View.
+- **Registry filter plumbing** — `to_openai_schema`/`to_anthropic_schema`/`to_mcp_schema` accept `filter_names=...`; excluded tools skip `resolve_params()`, avoiding MCP schema-fetch round-trips when the reranker filters them out.
+
+### Fixed
+
+- **Ollama Base URL documentation** — clarified that Ollama's OpenAI-compatible endpoints live under `/v1/*`, not `/api/*`. A `/api/` base URL previously produced silent HTTP 404s.
+
+## [0.9.0-alpha] - 2026-04-17
+
+Sketch editing, image-to-sketch, file attachments.
+
+### Added
+
+- **`edit_sketch` tool** — unified tool for modifying existing sketches: add/remove geometry and constraints, or wipe everything with `clear_all=true` and provide fresh geometry. Makes iterative sketch refinement reliable without recreating from scratch.
+- **`sketch-from-image` skill** (`/sketch-from-image`) — attach an image (PNG, JPG, SVG) and convert it to a constrained FreeCAD sketch at a specified real-world size. SVG inputs are read as text so the LLM parses coordinates directly. Works with vision-capable models or via a vision-fallback MCP. Handles rectangles, circles, polygons, and lines; curves are approximated.
+- **Document attachments** — chat now accepts non-image files. Text files are read and included in the message; binary files (PDF, DOCX, etc.) fire a `file_attach` hook for user-defined processing. Drag-and-drop, paste, and the attach button all work.
+- **MCP timeout configuration** — per-server tool call timeout in the Add/Edit MCP server dialog (default 600s).
+- **Auto-generated sketch constraints** — `create_sketch` and `edit_sketch` now automatically add `DistanceX`, `DistanceY` for rectangles and `Radius` for circles. LLMs no longer need to specify dimensional constraints by hand.
+
+### Fixed
+
+- **Duplicate constraints in sketches** — explicit constraints now overwrite auto-generated ones instead of creating duplicates (matched by Type + First + Second geometry indices).
+
+### Changed
+
+- **Tool descriptions carry Y-axis warning** — SVG/image coordinates use Y-down while FreeCAD uses Y-up. Tool descriptions now remind LLMs to negate Y values when converting.
+- **50 tools total** (was 48).
+- **648 unit tests** (was 626).
+
 ## [0.8.0-alpha] - 2026-04-05
 
 Parametric modeling, per-model parameters, batch operations, and multi-document support.
