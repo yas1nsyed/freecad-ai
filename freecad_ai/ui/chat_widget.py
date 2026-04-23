@@ -2070,7 +2070,15 @@ class ChatDockWidget(QDockWidget):
             "Please fix the code and try again. (Attempt {}/{})").format(
                 result.stderr, self._retry_count, get_config().max_retries)
 
-        self.conversation.add_system_message(error_msg)
+        # Attach a viewport snapshot so vision-capable LLMs can see the state
+        # that produced the error — especially useful for "runs but result is
+        # wrong" cases the user flagged via the Fix-with-AI composer.
+        capture_mode = (getattr(self, "_capture_mode_override", None)
+                        or get_config().viewport_capture)
+        vp_img = (self._capture_viewport_for_chat()
+                  if capture_mode != "off" else None)
+        self.conversation.add_system_message(
+            error_msg, images=[vp_img] if vp_img else None)
         self._append_html(render_message("system", error_msg))
 
         from ..core.system_prompt import build_system_prompt

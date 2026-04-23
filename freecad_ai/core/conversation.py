@@ -75,14 +75,21 @@ class Conversation:
             "content": content,
         })
 
-    def add_system_message(self, content: str):
-        """Add a system-level message (execution results, errors, etc.)."""
+    def add_system_message(self, content: str, images: list[dict] | None = None):
+        """Add a system-level message (execution results, errors, etc.).
+
+        Optionally attach images (e.g. a viewport capture) so vision-capable
+        LLMs can see the state the system message is describing.
+        """
         # System messages are stored as user messages with a prefix,
         # since not all LLM APIs support arbitrary system messages mid-conversation
-        self.messages.append({
-            "role": "user",
-            "content": f"[System] {content}",
-        })
+        prefixed = f"[System] {content}"
+        if images:
+            blocks = [{"type": "text", "text": prefixed}]
+            blocks.extend(images)
+            self.messages.append({"role": "user", "content": blocks})
+        else:
+            self.messages.append({"role": "user", "content": prefixed})
 
     def get_messages_for_api(self, max_chars: int = 100000,
                              api_style: str = "openai",

@@ -67,6 +67,31 @@ class TestAddMessages:
         assert msg["role"] == "user"
         assert msg["content"].startswith("[System]")
 
+    def test_add_system_message_with_image(self):
+        # System errors attach a viewport capture so vision-capable models
+        # can see the broken state. Content becomes a block list.
+        c = Conversation()
+        img = {
+            "type": "image",
+            "source": {"type": "base64", "media_type": "image/png", "data": "abc"},
+        }
+        c.add_system_message("Code failed", images=[img])
+        msg = c.messages[0]
+        assert msg["role"] == "user"
+        assert isinstance(msg["content"], list)
+        assert msg["content"][0]["type"] == "text"
+        assert msg["content"][0]["text"].startswith("[System]")
+        assert msg["content"][-1] is img
+
+    def test_add_system_message_no_image_stays_string(self):
+        # Backward compat: None/empty images keeps the plain-string content
+        # shape so OpenAI/Anthropic adapters don't need to handle both forms.
+        c = Conversation()
+        c.add_system_message("plain", images=None)
+        assert isinstance(c.messages[0]["content"], str)
+        c.add_system_message("also plain", images=[])
+        assert isinstance(c.messages[1]["content"], str)
+
     def test_message_ordering(self):
         c = Conversation()
         c.add_user_message("Question")
