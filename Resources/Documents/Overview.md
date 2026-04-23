@@ -14,6 +14,8 @@ An AI-powered assistant workbench for FreeCAD that creates and modifies
 - Thinking mode for complex multi-step reasoning
 - File attachments (images, text, PDFs via hooks)
 - Zero external dependencies
+- Plan-mode Check/Fix buttons for local-LLM users (sandbox validation + LLM code correction)
+- Persistent dock layout (tabs, position, floating geometry) across sessions
 
 ## Requirements
 

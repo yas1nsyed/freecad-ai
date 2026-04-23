@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.11.0-alpha] - 2026-04-23
+
+Plan-mode feedback loop for local-LLM users: sandbox validation that catches FreeCAD's C++ console errors, Check and Fix-with-AI buttons in the Review Code dialog, and viewport screenshots attached to error-retry messages. Plus dock layout persistence — the chat widget now remembers its area, tab siblings, and floating geometry across sessions.
+
+### Added
+
+- **Check button in Review Code dialog** — runs the generated Python in the existing subprocess sandbox, hooks `App.Console.AddObserver` to catch FreeCAD's C++-logged errors (topological naming, attachment, recompute failures) that never raise Python exceptions, and walks `doc.Objects` to flag invalid or null shapes. Reports issues without touching the live document.
+- **Fix with AI button in Review Code dialog** — always enabled. Opens a prompt composer pre-filled with a context-aware template (error, succeeded-but-wrong-output, or blank), which the user can edit before sending. Loops the generated code + feedback back to the LLM through the existing `_handle_execution_error` retry path.
+- **Viewport capture on error retries** — when `_handle_execution_error` hands code back to the LLM (either from the Act-mode agentic loop or the new Fix button), the current viewport is attached to the retry message. Vision-capable models can now see the visual effect of broken code, not just the traceback. Respects the existing `capture_mode` setting (off / every_message / after_changes).
+- **Chat dock layout persistence** — the FreeCAD AI dock now remembers its last area, tab siblings (e.g. tabified with Tasks), floating state, and geometry across FreeCAD sessions. Saves via `QMainWindow.saveState()` into AppConfig on dock signals, debounced move/resize, and a 3s safety-net poll. Save-enabled and shutdown guards prevent startup/teardown transients from overwriting the last good state.
+
+### Fixed
+
+- **Sandbox false-positive for FreeCAD console errors** — `_sandbox_test` previously wrapped `doc.recompute()` in `try/except` and reported success when no Python exception fired, even though the C++ layer had logged multiple `subshape not found` errors to the Report View. The validation now installs a Console observer before running user code and scans `doc.Objects` for invalid/null shapes after recompute, so C++-only failures surface as sandbox errors.
+
 ## [0.10.0-alpha] - 2026-04-21
 
 Tool reranking — keyword and LLM-based filtering to keep the tool-schema token footprint small when many tools are registered.

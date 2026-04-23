@@ -25,6 +25,7 @@ An AI-powered assistant workbench for FreeCAD that generates and executes Python
 - **Error self-correction** — failed code is sent back to the LLM for automatic retry (up to 3 attempts)
 - **AGENTS.md support** — project-level instructions with include directives and variable substitution
 - **Dark mode** — chat widget automatically adapts to FreeCAD's light/dark theme (theme changes require FreeCAD restart)
+- **Persistent dock layout** — the chat dock remembers its position, tab siblings (e.g. tabified with the Tasks panel), and floating geometry across FreeCAD sessions
 - **Zero external dependencies** — uses only Python stdlib (`urllib`, `json`, `threading`, `ssl`)
 
 ## Requirements
@@ -112,7 +113,7 @@ The checkbox is tristate: partially checked = auto-detect by model name (Gemma m
 
 ### Plan Mode
 
-Type a request like *"Create a box 50mm x 30mm x 20mm"*. The AI generates Python code and displays it for review. Click **Execute** to run it, or **Copy** to copy to clipboard.
+Type a request like *"Create a box 50mm x 30mm x 20mm"*. The AI generates Python code and displays it for review. Click **Execute** to run it, **Check** to run the sandbox validation (catches FreeCAD C++-console errors and invalid shapes without touching the live document), or **Fix with AI** to loop the code plus a prompt back to the LLM for correction. **Copy** copies to clipboard.
 
 ### Act Mode
 
