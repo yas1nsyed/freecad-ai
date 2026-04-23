@@ -2031,6 +2031,9 @@ class ChatDockWidget(QDockWidget):
                     parent = self
                 dlg = CodeReviewDialog(code, parent)
                 dlg.exec()
+                if dlg.fix_requested and dlg.last_error_result:
+                    self._handle_execution_error(dlg.last_error_result)
+                    return
                 result = dlg.get_result()
                 if not result:
                     continue
@@ -2104,6 +2107,9 @@ class ChatDockWidget(QDockWidget):
             parent = self
         dlg = CodeReviewDialog(code, parent)
         dlg.exec()
+        if dlg.fix_requested and dlg.last_error_result:
+            self._handle_execution_error(dlg.last_error_result)
+            return
         result = dlg.get_result()
 
         if result:
