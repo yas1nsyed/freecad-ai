@@ -2,7 +2,14 @@
 
 import pytest
 
-from freecad_ai.core.executor import extract_code_blocks, _validate_code
+from unittest.mock import patch
+
+from freecad_ai.core.executor import (
+    ExecutionResult,
+    extract_code_blocks,
+    validate_code,
+    _validate_code,
+)
 
 
 class TestExtractCodeBlocks:
@@ -133,3 +140,58 @@ class TestValidateCode:
         code = "name = 'Revolution'\nprint(name)"
         warnings = _validate_code(code)
         assert warnings == []
+
+
+class TestValidateCodePublic:
+    """validate_code() is the Check-button entry point — returns ExecutionResult."""
+
+    def test_static_failure_returns_error_result(self):
+        dangerous = "os" + ".system('rm -rf /')"
+        result = validate_code(dangerous)
+        assert isinstance(result, ExecutionResult)
+        assert result.success is False
+        assert "os.system" in result.stderr
+        assert result.code == dangerous
+
+    def test_static_failure_mentions_static_validation(self):
+        # The stderr prefix distinguishes static from sandbox failures so the
+        # UI (and the LLM, when Fix fires) knows which layer complained.
+        result = validate_code("subprocess.run(['x'])")
+        assert "Static validation" in result.stderr
+
+    def test_passes_when_sandbox_unavailable(self):
+        # If no FreeCAD binary is on the system, _sandbox_test returns
+        # (True, "") — validate_code should surface that as a pass.
+        with patch("freecad_ai.core.executor._find_freecad_cmd", return_value=""):
+            with patch(
+                "freecad_ai.core.active_document.get_synced_active_document",
+                return_value=None,
+            ):
+                result = validate_code("import FreeCAD as App\ndoc = App.newDocument()")
+        assert result.success is True
+        assert result.stderr == ""
+
+    def test_sandbox_failure_propagates_error(self):
+        # Simulate a sandbox-detected error; validate_code should wrap it.
+        with patch("freecad_ai.core.executor._sandbox_test", return_value=(False, "boom")):
+            with patch(
+                "freecad_ai.core.active_document.get_synced_active_document",
+                return_value=None,
+            ):
+                result = validate_code("x = 1")
+        assert result.success is False
+        assert "boom" in result.stderr
+
+    def test_returns_execution_result_shape(self):
+        # The Fix button feeds last_error_result into _handle_execution_error,
+        # which reads .stderr and .success — this contract must not drift.
+        with patch("freecad_ai.core.executor._sandbox_test", return_value=(False, "err")):
+            with patch(
+                "freecad_ai.core.active_document.get_synced_active_document",
+                return_value=None,
+            ):
+                result = validate_code("x = 1")
+        assert hasattr(result, "success")
+        assert hasattr(result, "stdout")
+        assert hasattr(result, "stderr")
+        assert hasattr(result, "code")

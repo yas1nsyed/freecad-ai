@@ -102,10 +102,34 @@ def _sandbox_test(code: str, timeout: int = 15, document_path: str | None = None
 
     # Harness: run user code, then close all documents without saving (temp copy is disposable).
     # Stub FreeCADGui view methods that only work in a graphical session.
+    # Harness captures two classes of failure that Python exceptions miss:
+    #   1. FreeCAD.Console.PrintError messages (C++ layer logging — e.g.
+    #      PositionBySupport attachment failures, topological naming mismatches)
+    #   2. Features that build a null/invalid Shape without raising
     harness = '''import sys, json, traceback
 result = {{"ok": False, "error": ""}}
 try:
     import FreeCAD as App
+
+    # Console observer — captures errors/warnings the C++ layer logs to the
+    # Report View. Without this, attachment and recompute failures silently
+    # pass the sandbox because no Python exception is raised.
+    class _ErrObs:
+        def __init__(self):
+            self.errors = []
+            self.warnings = []
+        def OnError(self, msg, *a, **kw):
+            self.errors.append(str(msg).strip())
+        def OnWarning(self, msg, *a, **kw):
+            self.warnings.append(str(msg).strip())
+    _err_obs = _ErrObs()
+    _observer_installed = False
+    try:
+        App.Console.AddObserver(_err_obs)
+        _observer_installed = True
+    except Exception:
+        pass
+
     try:
         import FreeCADGui as Gui
         # Console mode: Gui module exists but has no active view.
@@ -120,7 +144,36 @@ try:
 {indented_code}
     # --- end user code ---
     doc.recompute()
-    result["ok"] = True
+
+    # Post-execution validation: collect console errors + walk objects for
+    # null/invalid shapes. Either signal means the code "ran" but broke the
+    # model — exactly the case where Python-exception-only checking fails.
+    _issues = []
+    if _observer_installed:
+        # De-dup — C++ logs the same error per failed recompute iteration
+        _seen = set()
+        for _e in _err_obs.errors:
+            if _e and _e not in _seen:
+                _seen.add(_e)
+                _issues.append("FreeCAD error: " + _e)
+    for _obj in doc.Objects:
+        _shape = getattr(_obj, "Shape", None)
+        if _shape is not None:
+            try:
+                if _shape.isNull():
+                    _issues.append("Object '" + _obj.Name + "' has null shape")
+                elif not _shape.isValid():
+                    _issues.append("Object '" + _obj.Name + "' has invalid shape")
+            except Exception:
+                pass
+        _state = getattr(_obj, "State", None)
+        if _state and "Invalid" in _state:
+            _issues.append("Object '" + _obj.Name + "' is in Invalid state")
+
+    if _issues:
+        result["error"] = "Post-execution validation found issues:\\n" + "\\n".join(_issues)
+    else:
+        result["ok"] = True
 except Exception as e:
     result["error"] = traceback.format_exc()
 finally:
@@ -345,6 +398,55 @@ def execute_code(code: str, timeout: int = 30, sandbox: bool = True) -> Executio
         stderr=captured_err.getvalue(),
         code=code,
     )
+
+
+def validate_code(code: str, timeout: int = 15) -> ExecutionResult:
+    """Run static + sandbox validation without touching the live document.
+
+    Runs Layer 1 (static pattern check) and Layer 2 (headless subprocess
+    against a temp copy of the active document). Skips Layer 3/4. Returns
+    an ExecutionResult so callers can reuse the same error-surfacing path
+    they use for actual execution.
+
+    If no FreeCAD console binary is available, the sandbox is skipped and
+    the result is a pass — matches execute_code()'s fallback behavior.
+    """
+    warnings = _validate_code(code)
+    if warnings:
+        return ExecutionResult(
+            success=False,
+            stdout="",
+            stderr="Static validation failed:\n" + "\n".join(warnings),
+            code=code,
+        )
+
+    from .active_document import get_synced_active_document
+    pre_doc = get_synced_active_document()
+    fn = getattr(pre_doc, "FileName", "") if pre_doc else ""
+    sandbox_copy_path = None
+    if fn and os.path.isfile(fn):
+        try:
+            fd, sandbox_copy_path = tempfile.mkstemp(suffix=".FCStd")
+            os.close(fd)
+            shutil.copy2(fn, sandbox_copy_path)
+        except OSError as e:
+            return ExecutionResult(
+                success=False,
+                stdout="",
+                stderr=f"Sandbox: could not copy document for validation: {e}",
+                code=code,
+            )
+    try:
+        safe, err = _sandbox_test(code, timeout=timeout, document_path=sandbox_copy_path)
+    finally:
+        if sandbox_copy_path:
+            try:
+                os.unlink(sandbox_copy_path)
+            except OSError:
+                pass
+    if safe:
+        return ExecutionResult(success=True, stdout="", stderr="", code=code)
+    return ExecutionResult(success=False, stdout="", stderr=err, code=code)
 
 
 def _validate_code(code: str) -> list[str]:
