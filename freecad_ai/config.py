@@ -87,6 +87,19 @@ class AppConfig:
     rerank_llm_api_key: str = ""
     rerank_llm_model: str = ""
 
+    # Chat dock layout persistence. FreeCAD's native mw.restoreState runs
+    # before the workbench activates, so our dock misses the restore and
+    # lands at its default area every startup. We snapshot our own state
+    # on dock-move events and reapply in get_chat_dock().
+    chat_dock_floating: bool = False
+    chat_dock_area: str = "right"  # "left", "right", "top", "bottom"
+    chat_dock_geometry: list = field(default_factory=list)  # [x, y, w, h] when floating
+    chat_dock_tabified_with: list = field(default_factory=list)  # sibling objectNames
+    # Base64-encoded QMainWindow.saveState() — captures tabification reliably
+    # (surgical tabified_with list can miss tabify-by-drag because no Qt signal
+    # fires in that case).
+    chat_dock_mw_state: str = ""
+
     @property
     def supports_vision(self) -> bool:
         """Whether the current LLM supports vision (images in content blocks)."""

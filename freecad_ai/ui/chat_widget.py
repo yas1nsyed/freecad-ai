@@ -790,6 +790,158 @@ class ChatDockWidget(QDockWidget):
         self._refresh_image_controls()
         self.setAcceptDrops(True)
 
+        self._shutting_down = False
+        # Starts disabled: get_chat_dock flips this on after the restore runs.
+        # Otherwise addDockWidget emits dockLocationChanged BEFORE restore can
+        # read the saved state from disk, and our first save overwrites the
+        # previous session's good state with the current (default) state.
+        self._saves_enabled = False
+
+        self.dockLocationChanged.connect(self._save_dock_state)
+        self.topLevelChanged.connect(self._save_dock_state)
+        # visibilityChanged catches tabify when our dock becomes a background tab
+        self.visibilityChanged.connect(self._save_dock_state)
+
+        # Debounced save for tabify-by-drag. Tabification emits no dedicated
+        # Qt signal, but the dock's geometry changes when it joins a tab group,
+        # which triggers resizeEvent. Debounce to avoid thrashing on active drag.
+        self._dock_save_timer = QtCore.QTimer(self)
+        self._dock_save_timer.setSingleShot(True)
+        self._dock_save_timer.setInterval(500)
+        self._dock_save_timer.timeout.connect(self._save_dock_state)
+
+        # Periodic poll — tabify-by-drag may not fire any signal we can hook,
+        # so snapshot layout every 3s as a safety net. Cheap: only writes to
+        # disk when state actually changes.
+        self._dock_poll_timer = QtCore.QTimer(self)
+        self._dock_poll_timer.setInterval(3000)
+        self._dock_poll_timer.timeout.connect(self._save_dock_state)
+        self._dock_poll_timer.start()
+
+        # Shutdown detection. During FreeCAD close the layout can transiently
+        # un-tabify docks before teardown completes; if we save during that
+        # window we overwrite the last good state. Install an event filter on
+        # the main window to catch its Close event and freeze saves from then
+        # on. aboutToQuit is a belt-and-suspenders backstop for the same flag.
+        try:
+            mw_local = self._get_main_window()
+            if mw_local is not None:
+                mw_local.installEventFilter(self)
+        except Exception:
+            pass
+        try:
+            app = QApplication.instance()
+            if app is not None:
+                app.aboutToQuit.connect(self._mark_shutdown)
+        except Exception:
+            pass
+
+    def _mark_shutdown(self):
+        self._shutting_down = True
+        t = getattr(self, "_dock_poll_timer", None)
+        if t is not None:
+            try:
+                t.stop()
+            except Exception:
+                pass
+
+    def eventFilter(self, obj, event):
+        try:
+            if event.type() == QtCore.QEvent.Close:
+                mw = self._get_main_window()
+                if obj is mw:
+                    self._mark_shutdown()
+        except Exception:
+            pass
+        return False
+
+    def _get_main_window(self):
+        """Resolve the QMainWindow. self.parent() returns None when floating."""
+        try:
+            import FreeCADGui as Gui
+            mw = Gui.getMainWindow()
+            if mw is not None:
+                return mw
+        except Exception:
+            pass
+        return self.parent()
+
+    def _save_dock_state(self, *_):
+        """Snapshot dock layout so get_chat_dock can restore it next startup.
+
+        FreeCAD restores main-window state before our workbench activates,
+        which means our dock misses the restore. Saving our own state here
+        and reapplying on creation is the workaround.
+        """
+        if getattr(self, "_shutting_down", False):
+            return
+        if not getattr(self, "_saves_enabled", False):
+            return
+        try:
+            import base64
+            cfg = get_config()
+            prev_area = cfg.chat_dock_area
+            prev_floating = cfg.chat_dock_floating
+            prev_tabified = list(cfg.chat_dock_tabified_with or [])
+            prev_state = cfg.chat_dock_mw_state
+
+            cfg.chat_dock_floating = bool(self.isFloating())
+            if self.isFloating():
+                g = self.geometry()
+                cfg.chat_dock_geometry = [g.x(), g.y(), g.width(), g.height()]
+
+            mw = self._get_main_window()
+            area = None
+            if mw is not None and hasattr(mw, "dockWidgetArea"):
+                try:
+                    area = mw.dockWidgetArea(self)
+                except Exception:
+                    area = None
+            cfg.chat_dock_area = _area_to_str(area) or cfg.chat_dock_area
+
+            tabified = []
+            if mw is not None and hasattr(mw, "tabifiedDockWidgets"):
+                try:
+                    for s in mw.tabifiedDockWidgets(self) or []:
+                        n = s.objectName()
+                        if n:
+                            tabified.append(n)
+                except Exception:
+                    pass
+            cfg.chat_dock_tabified_with = tabified
+
+            new_state = prev_state
+            if mw is not None and hasattr(mw, "saveState"):
+                try:
+                    raw = bytes(mw.saveState())
+                    new_state = base64.b64encode(raw).decode("ascii")
+                    cfg.chat_dock_mw_state = new_state
+                except Exception:
+                    pass
+
+            changed = (
+                prev_area != cfg.chat_dock_area
+                or prev_floating != cfg.chat_dock_floating
+                or prev_tabified != tabified
+                or prev_state != new_state
+            )
+            if changed:
+                save_current_config()
+        except Exception:
+            pass
+
+    def moveEvent(self, event):
+        super().moveEvent(event)
+        timer = getattr(self, "_dock_save_timer", None)
+        if timer is not None:
+            timer.start()
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        timer = getattr(self, "_dock_save_timer", None)
+        if timer is not None:
+            timer.start()
+
     def _build_ui(self):
         container = QWidget()
         layout = QVBoxLayout(container)
@@ -2387,9 +2539,12 @@ class ChatDockWidget(QDockWidget):
             )
 
     def closeEvent(self, event):
-        """Save conversation and disconnect MCP when widget is closed."""
+        """Save conversation, dock layout, and disconnect MCP when widget is closed."""
         if self.conversation.messages:
             self.conversation.save()
+        # Snapshot final dock layout — dockLocationChanged/topLevelChanged
+        # don't always fire for tabify-by-drag, so closeEvent is our backstop.
+        self._save_dock_state()
         # Disconnect MCP servers
         if self._mcp_connected:
             try:
@@ -2398,6 +2553,79 @@ class ChatDockWidget(QDockWidget):
             except Exception:
                 pass
         super().closeEvent(event)
+
+
+# ── Dock layout persistence helpers ─────────────────────────
+
+def _area_to_str(area):
+    """Convert Qt.DockWidgetArea to a JSON-friendly string."""
+    mapping = {
+        Qt.LeftDockWidgetArea: "left",
+        Qt.RightDockWidgetArea: "right",
+        Qt.TopDockWidgetArea: "top",
+        Qt.BottomDockWidgetArea: "bottom",
+    }
+    return mapping.get(area, "")
+
+
+def _str_to_area(s):
+    """Inverse of _area_to_str. Defaults to right on unknown."""
+    mapping = {
+        "left": Qt.LeftDockWidgetArea,
+        "right": Qt.RightDockWidgetArea,
+        "top": Qt.TopDockWidgetArea,
+        "bottom": Qt.BottomDockWidgetArea,
+    }
+    return mapping.get(s, Qt.RightDockWidgetArea)
+
+
+def _apply_saved_dock_state(mw, dock):
+    """Reposition dock per saved AppConfig fields.
+
+    Must be called after mw.addDockWidget. Prefers the full mw.saveState()
+    blob (captures tabification); falls back to the surgical fields if the
+    blob is absent or restoreState rejects it.
+    """
+    cfg = get_config()
+
+    restored_via_state = False
+    if cfg.chat_dock_mw_state:
+        try:
+            import base64
+            raw = base64.b64decode(cfg.chat_dock_mw_state.encode("ascii"))
+            ba = QtCore.QByteArray(raw)
+            restored_via_state = bool(mw.restoreState(ba))
+        except Exception:
+            restored_via_state = False
+
+    if restored_via_state:
+        # Qt handled area, tabification, and splitter sizes. Apply floating
+        # geometry only — restoreState sometimes loses the exact window rect
+        # for floating docks.
+        if cfg.chat_dock_floating and len(cfg.chat_dock_geometry) == 4:
+            try:
+                dock.setFloating(True)
+                x, y, w, h = cfg.chat_dock_geometry
+                dock.setGeometry(int(x), int(y), int(w), int(h))
+            except Exception:
+                pass
+        return
+
+    # Fallback path: surgical fields used only when mw.saveState blob is
+    # absent (first run) or restoreState fails.
+    try:
+        for name in cfg.chat_dock_tabified_with or []:
+            if not name:
+                continue
+            sibling = mw.findChild(QDockWidget, name)
+            if sibling is not None and sibling is not dock:
+                mw.tabifyDockWidget(sibling, dock)
+        if cfg.chat_dock_floating and len(cfg.chat_dock_geometry) == 4:
+            dock.setFloating(True)
+            x, y, w, h = cfg.chat_dock_geometry
+            dock.setGeometry(int(x), int(y), int(w), int(h))
+    except Exception:
+        pass
 
 
 # ── Singleton access ────────────────────────────────────────
@@ -2424,6 +2652,13 @@ def get_chat_dock(create=True):
     _dock_widget = ChatDockWidget(mw)
 
     if mw:
-        mw.addDockWidget(Qt.RightDockWidgetArea, _dock_widget)
+        cfg = get_config()
+        area = _str_to_area(cfg.chat_dock_area)
+        mw.addDockWidget(area, _dock_widget)
+        _apply_saved_dock_state(mw, _dock_widget)
+        # Enable state persistence now that restore has finished. Prevents
+        # the addDockWidget-triggered signal avalanche from overwriting the
+        # previous session's saved state before we've had a chance to read it.
+        _dock_widget._saves_enabled = True
 
     return _dock_widget

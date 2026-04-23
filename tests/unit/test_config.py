@@ -98,6 +98,29 @@ class TestAppConfig:
         assert restored.temperature == 0.7
         assert restored.thinking == "on"
 
+    def test_chat_dock_state_defaults(self):
+        c = AppConfig()
+        assert c.chat_dock_floating is False
+        assert c.chat_dock_area == "right"
+        assert c.chat_dock_geometry == []
+        assert c.chat_dock_tabified_with == []
+        assert c.chat_dock_mw_state == ""
+
+    def test_chat_dock_state_roundtrip(self):
+        c = AppConfig()
+        c.chat_dock_floating = True
+        c.chat_dock_area = "left"
+        c.chat_dock_geometry = [100, 200, 400, 600]
+        c.chat_dock_tabified_with = ["Tasks", "ModelView"]
+        c.chat_dock_mw_state = "aGVsbG8gd29ybGQ="  # base64 placeholder
+        d = c.to_dict()
+        c2 = AppConfig.from_dict(d)
+        assert c2.chat_dock_floating is True
+        assert c2.chat_dock_area == "left"
+        assert c2.chat_dock_geometry == [100, 200, 400, 600]
+        assert c2.chat_dock_tabified_with == ["Tasks", "ModelView"]
+        assert c2.chat_dock_mw_state == "aGVsbG8gd29ybGQ="
+
 
 class TestProviderPresets:
     def test_all_presets_have_required_keys(self):
