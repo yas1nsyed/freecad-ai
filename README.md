@@ -75,6 +75,8 @@ Both UIs stay in sync. Configuration is stored at `~/.config/FreeCAD/FreeCADAI/c
 
 API keys can be entered as plain text, but for shared machines, repos, or backups, the key field accepts two prefixes that keep the secret out of the config file. Both work on Linux, macOS, and Windows.
 
+> **Note on platform coverage:** the workbench is developed and tested on Linux. The macOS and Windows examples below follow the documented behavior of the underlying tools (`security`, `CredentialManager`, `expanduser`/`expandvars`, `subprocess.run(shell=True)`) but have **not** been verified on those OSes by the maintainer. If you run into a platform-specific issue, please [open an issue](https://github.com/ghbalf/freecad-ai/issues) — patches and corrections welcome.
+
 **`file:` — read key from a file** (re-read on every API call). Path supports `~` and OS env vars (`$HOME`, `%APPDATA%`).
 
 | OS | Example |
