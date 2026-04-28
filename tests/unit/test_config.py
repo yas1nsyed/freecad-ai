@@ -197,4 +197,144 @@ class TestSingleton:
         save_current_config()  # Should not raise
 
 
+class TestParamStoreBridge:
+    """Bridge between FreeCAD's BaseApp/Preferences/Mod/FreeCADAI store and AppConfig."""
+
+    def _fake_param_group(self, ints=None, strings=None, bools=None):
+        """Mimic the relevant parts of a FreeCAD ParamGet group object."""
+        ints = dict(ints or {})
+        strings = dict(strings or {})
+        bools = dict(bools or {})
+
+        class _FakeGroup:
+            def GetInts(_self):  # noqa: N802 — mimicking FreeCAD camelCase
+                return list(ints.keys())
+            def GetStrings(_self):
+                return list(strings.keys())
+            def GetBools(_self):
+                return list(bools.keys())
+            def GetInt(_self, key, default=0):
+                return ints.get(key, default)
+            def GetString(_self, key, default=""):
+                return strings.get(key, default)
+            def GetBool(_self, key, default=False):
+                return bools.get(key, default)
+            def SetInt(_self, key, value):
+                ints[key] = value
+            def SetString(_self, key, value):
+                strings[key] = value
+            def SetBool(_self, key, value):
+                bools[key] = value
+
+        return _FakeGroup(), ints, strings, bools
+
+    def test_overrides_skipped_when_param_store_unavailable(self):
+        """Outside FreeCAD, _get_param_group returns None — cfg unchanged."""
+        from freecad_ai.config import AppConfig, _apply_param_store_overrides
+        cfg = AppConfig()
+        cfg.provider.name = "anthropic"
+        _apply_param_store_overrides(cfg)  # no FreeCAD → no-op
+        assert cfg.provider.name == "anthropic"
+
+    def test_apply_overrides_provider_index(self):
+        from freecad_ai.config import AppConfig, _apply_param_store_overrides
+        from unittest.mock import patch
+        cfg = AppConfig()
+        cfg.provider.name = "anthropic"
+        group, _, _, _ = self._fake_param_group(ints={"ProviderIndex": 2})  # ollama
+        with patch("freecad_ai.config._get_param_group", return_value=group):
+            _apply_param_store_overrides(cfg)
+        assert cfg.provider.name == "ollama"
+
+    def test_apply_overrides_strings(self):
+        from freecad_ai.config import AppConfig, _apply_param_store_overrides
+        from unittest.mock import patch
+        cfg = AppConfig()
+        group, _, _, _ = self._fake_param_group(strings={
+            "Model": "qwen3-vl:32b",
+            "BaseUrl": "http://spark:11434/v1",
+            "ApiKey": "cmd:secret-tool lookup service freecad-ai",
+        })
+        with patch("freecad_ai.config._get_param_group", return_value=group):
+            _apply_param_store_overrides(cfg)
+        assert cfg.provider.model == "qwen3-vl:32b"
+        assert cfg.provider.base_url == "http://spark:11434/v1"
+        assert cfg.provider.api_key == "cmd:secret-tool lookup service freecad-ai"
+
+    def test_apply_overrides_bool_and_int(self):
+        from freecad_ai.config import AppConfig, _apply_param_store_overrides
+        from unittest.mock import patch
+        cfg = AppConfig()
+        cfg.enable_tools = True
+        cfg.max_tokens = 4096
+        group, _, _, _ = self._fake_param_group(
+            bools={"EnableTools": False},
+            ints={"MaxTokens": 8192, "ModeIndex": 1, "ThinkingIndex": 2},
+        )
+        with patch("freecad_ai.config._get_param_group", return_value=group):
+            _apply_param_store_overrides(cfg)
+        assert cfg.enable_tools is False
+        assert cfg.max_tokens == 8192
+        assert cfg.mode == "act"
+        assert cfg.thinking == "extended"
+
+    def test_apply_overrides_skips_untouched_keys(self):
+        """Param store with no relevant keys → cfg untouched."""
+        from freecad_ai.config import AppConfig, _apply_param_store_overrides
+        from unittest.mock import patch
+        cfg = AppConfig()
+        cfg.provider.name = "anthropic"
+        cfg.max_tokens = 4096
+        group, _, _, _ = self._fake_param_group()  # all empty
+        with patch("freecad_ai.config._get_param_group", return_value=group):
+            _apply_param_store_overrides(cfg)
+        assert cfg.provider.name == "anthropic"
+        assert cfg.max_tokens == 4096
+
+    def test_apply_ignores_out_of_range_index(self):
+        """Defensive — corrupt param store with bad enum index leaves cfg alone."""
+        from freecad_ai.config import AppConfig, _apply_param_store_overrides
+        from unittest.mock import patch
+        cfg = AppConfig()
+        cfg.mode = "plan"
+        group, _, _, _ = self._fake_param_group(ints={"ModeIndex": 99})
+        with patch("freecad_ai.config._get_param_group", return_value=group):
+            _apply_param_store_overrides(cfg)
+        assert cfg.mode == "plan"
+
+    def test_write_to_param_store_round_trips(self):
+        """Write then re-apply via overrides — values come back identical."""
+        from freecad_ai.config import (
+            AppConfig, _apply_param_store_overrides, _write_to_param_store,
+        )
+        from unittest.mock import patch
+        group, ints, strings, bools = self._fake_param_group()
+
+        cfg_out = AppConfig()
+        cfg_out.provider.name = "ollama"
+        cfg_out.provider.model = "gemma3:4b"
+        cfg_out.provider.base_url = "http://spark:11434/v1"
+        cfg_out.provider.api_key = "file:/etc/keys/api"
+        cfg_out.mode = "act"
+        cfg_out.thinking = "on"
+        cfg_out.max_tokens = 16384
+        cfg_out.enable_tools = False
+
+        with patch("freecad_ai.config._get_param_group", return_value=group):
+            _write_to_param_store(cfg_out)
+
+        cfg_in = AppConfig()  # fresh defaults
+        with patch("freecad_ai.config._get_param_group", return_value=group):
+            _apply_param_store_overrides(cfg_in)
+
+        assert cfg_in.provider.name == "ollama"
+        assert cfg_in.provider.model == "gemma3:4b"
+        assert cfg_in.provider.base_url == "http://spark:11434/v1"
+        assert cfg_in.provider.api_key == "file:/etc/keys/api"
+        assert cfg_in.mode == "act"
+        assert cfg_in.thinking == "on"
+        assert cfg_in.max_tokens == 16384
+        assert cfg_in.enable_tools is False
+
+
 import os

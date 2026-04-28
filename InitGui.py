@@ -97,6 +97,28 @@ try:
 except Exception:
     pass
 
+# Register the icons directory so FreeCAD can find preferences-freecadai.svg
+# (the sidebar icon for our Edit → Preferences page).
+try:
+    from freecad_ai.paths import get_icons_dir as _gid
+    _icons_dir = _gid()
+    if _icons_dir:
+        Gui.addIconPath(_icons_dir)
+except Exception:
+    pass
+
+# Register the FreeCAD AI preferences page in Edit → Preferences. The
+# Gui::Pref* widgets in the form auto-save to BaseApp/Preferences/Mod/FreeCADAI;
+# our config layer mirrors values from there into ~/.config/FreeCAD/FreeCADAI/config.json
+# on load so both this page and the workbench's Settings dialog stay in sync.
+try:
+    from freecad_ai.paths import get_prefs_ui_path as _gpup
+    _prefs_ui = _gpup()
+    if _prefs_ui:
+        Gui.addPreferencePage(_prefs_ui, "FreeCAD AI")
+except Exception:
+    pass
+
 Gui.addCommand("FreeCADAI_OpenChat", OpenChatCommand())
 Gui.addCommand("FreeCADAI_OpenSettings", OpenSettingsCommand())
 Gui.addWorkbench(FreeCADAIWorkbench())

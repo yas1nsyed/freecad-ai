@@ -150,23 +150,117 @@ def _ensure_dirs():
 
 
 def load_config() -> AppConfig:
-    """Load configuration from disk. Returns defaults if file doesn't exist."""
+    """Load configuration from disk. Returns defaults if file doesn't exist.
+
+    After loading from JSON, layers any values present in FreeCAD's parameter
+    store (BaseApp/Preferences/Mod/FreeCADAI) on top — so changes the user
+    made via Edit → Preferences propagate to the workbench's settings on
+    next load even though they're written by FreeCAD's Pref* widgets.
+    """
     _ensure_dirs()
+    cfg = AppConfig()
     if os.path.exists(CONFIG_FILE):
         try:
             with open(CONFIG_FILE, "r") as f:
                 data = json.load(f)
-            return AppConfig.from_dict(data)
+            cfg = AppConfig.from_dict(data)
         except (json.JSONDecodeError, TypeError, KeyError):
             pass
-    return AppConfig()
+    _apply_param_store_overrides(cfg)
+    return cfg
 
 
 def save_config(config: AppConfig):
-    """Save configuration to disk."""
+    """Save configuration to disk and mirror to FreeCAD's parameter store."""
     _ensure_dirs()
     with open(CONFIG_FILE, "w") as f:
         json.dump(config.to_dict(), f, indent=2)
+    _write_to_param_store(config)
+
+
+# ── FreeCAD parameter-store bridge ──────────────────────────────────────
+#
+# Edit → Preferences uses Gui::Pref* widgets that auto-save to
+# BaseApp/Preferences/Mod/FreeCADAI/. AppConfig stores everything in JSON
+# at ~/.config/FreeCAD/FreeCADAI/config.json. We mirror the subset of
+# fields exposed in the preferences page so both UIs stay coherent.
+#
+# Indices stored in the param store correspond to the order of items in
+# resources/panels/FreeCADAIPrefs.ui — keep these lists in sync.
+
+_PARAM_PROVIDERS = [
+    "anthropic", "openai", "ollama", "gemini", "openrouter",
+    "moonshot", "deepseek", "qwen", "groq", "mistral", "together",
+]
+_PARAM_MODES = ["plan", "act"]
+_PARAM_THINKING = ["off", "on", "extended"]
+
+
+def _get_param_group():
+    """Return the FreeCAD ParamGet group, or None when running outside FreeCAD."""
+    try:
+        import FreeCAD
+        return FreeCAD.ParamGet("User parameter:BaseApp/Preferences/Mod/FreeCADAI")
+    except (ImportError, RuntimeError):
+        return None
+
+
+def _apply_param_store_overrides(cfg: AppConfig) -> None:
+    """Layer ParamGet values onto cfg for fields exposed in the prefs page.
+
+    Only overrides when the param store has an explicit value. The Pref*
+    widgets only write on first interaction, so an unset key means the user
+    hasn't touched the preferences page — JSON value stays authoritative.
+    """
+    group = _get_param_group()
+    if group is None:
+        return
+    keys = set(group.GetStrings()) | set(group.GetInts()) | set(group.GetBools())
+
+    if "ProviderIndex" in keys:
+        idx = group.GetInt("ProviderIndex", 0)
+        if 0 <= idx < len(_PARAM_PROVIDERS):
+            cfg.provider.name = _PARAM_PROVIDERS[idx]
+    if "Model" in keys:
+        cfg.provider.model = group.GetString("Model", cfg.provider.model)
+    if "BaseUrl" in keys:
+        cfg.provider.base_url = group.GetString("BaseUrl", cfg.provider.base_url)
+    if "ApiKey" in keys:
+        cfg.provider.api_key = group.GetString("ApiKey", cfg.provider.api_key)
+    if "ModeIndex" in keys:
+        idx = group.GetInt("ModeIndex", 0)
+        if 0 <= idx < len(_PARAM_MODES):
+            cfg.mode = _PARAM_MODES[idx]
+    if "ThinkingIndex" in keys:
+        idx = group.GetInt("ThinkingIndex", 0)
+        if 0 <= idx < len(_PARAM_THINKING):
+            cfg.thinking = _PARAM_THINKING[idx]
+    if "MaxTokens" in keys:
+        cfg.max_tokens = group.GetInt("MaxTokens", cfg.max_tokens)
+    if "EnableTools" in keys:
+        cfg.enable_tools = group.GetBool("EnableTools", cfg.enable_tools)
+
+
+def _write_to_param_store(cfg: AppConfig) -> None:
+    """Mirror cfg values to ParamGet so the preferences page reflects them.
+
+    Lets the user open Edit → Preferences after using the Settings dialog
+    and see current values rather than stale Pref widget defaults.
+    """
+    group = _get_param_group()
+    if group is None:
+        return
+    if cfg.provider.name in _PARAM_PROVIDERS:
+        group.SetInt("ProviderIndex", _PARAM_PROVIDERS.index(cfg.provider.name))
+    group.SetString("Model", cfg.provider.model)
+    group.SetString("BaseUrl", cfg.provider.base_url)
+    group.SetString("ApiKey", cfg.provider.api_key)
+    if cfg.mode in _PARAM_MODES:
+        group.SetInt("ModeIndex", _PARAM_MODES.index(cfg.mode))
+    if cfg.thinking in _PARAM_THINKING:
+        group.SetInt("ThinkingIndex", _PARAM_THINKING.index(cfg.thinking))
+    group.SetInt("MaxTokens", int(cfg.max_tokens))
+    group.SetBool("EnableTools", bool(cfg.enable_tools))
 
 
 # Singleton config instance

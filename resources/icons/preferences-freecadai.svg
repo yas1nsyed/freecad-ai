@@ -1,0 +1,28 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
+  <!-- Chat bubble (workbench identity) -->
+  <rect x="4" y="6" width="44" height="32" rx="6" ry="6" fill="#3daee9" stroke="#1d6fa5" stroke-width="2"/>
+  <polygon points="14,38 22,38 10,46" fill="#3daee9" stroke="#1d6fa5" stroke-width="2" stroke-linejoin="round"/>
+  <rect x="12" y="36" width="12" height="4" fill="#3daee9"/>
+  <!-- Tiny cube inside the bubble -->
+  <g transform="translate(26,22) scale(0.6)">
+    <polygon points="0,-12 14,-5 0,2 -14,-5" fill="#ffffff" stroke="#1d6fa5" stroke-width="2" opacity="0.95"/>
+    <polygon points="-14,-5 0,2 0,16 -14,9" fill="#d4e8f7" stroke="#1d6fa5" stroke-width="2" opacity="0.95"/>
+    <polygon points="14,-5 0,2 0,16 14,9" fill="#a8d1ef" stroke="#1d6fa5" stroke-width="2" opacity="0.95"/>
+  </g>
+  <!-- Settings gear (lower-right, marks this as the preferences page icon) -->
+  <g transform="translate(48,46)">
+    <!-- Eight-tooth gear -->
+    <g fill="#5a5a5a" stroke="#2c2c2c" stroke-width="1.2">
+      <rect x="-2" y="-15" width="4" height="6"/>
+      <rect x="-2" y="9" width="4" height="6"/>
+      <rect x="-15" y="-2" width="6" height="4"/>
+      <rect x="9" y="-2" width="6" height="4"/>
+      <rect x="-11.3" y="-11.3" width="6" height="4" transform="rotate(45)"/>
+      <rect x="5.3" y="-11.3" width="6" height="4" transform="rotate(45)"/>
+      <rect x="-11.3" y="-11.3" width="6" height="4" transform="rotate(-45)"/>
+      <rect x="5.3" y="-11.3" width="6" height="4" transform="rotate(-45)"/>
+    </g>
+    <circle cx="0" cy="0" r="9" fill="#5a5a5a" stroke="#2c2c2c" stroke-width="1.5"/>
+    <circle cx="0" cy="0" r="4" fill="#ffffff" stroke="#2c2c2c" stroke-width="1.5"/>
+  </g>
+</svg>

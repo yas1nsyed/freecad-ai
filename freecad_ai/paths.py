@@ -36,3 +36,27 @@ def get_icon_path() -> str:
         if os.path.exists(p):
             return p
     return ""
+
+
+def get_icons_dir() -> str:
+    """Get the path to the icons directory, or empty string.
+
+    FreeCAD looks for the preferences page sidebar icon
+    (preferences-freecadai.svg) on the registered icon search path.
+    """
+    wb = get_wb_dir()
+    if wb:
+        p = os.path.join(wb, "resources", "icons")
+        if os.path.isdir(p):
+            return p
+    return ""
+
+
+def get_prefs_ui_path() -> str:
+    """Get the path to the preferences page .ui file, or empty string."""
+    wb = get_wb_dir()
+    if wb:
+        p = os.path.join(wb, "resources", "panels", "FreeCADAIPrefs.ui")
+        if os.path.exists(p):
+            return p
+    return ""

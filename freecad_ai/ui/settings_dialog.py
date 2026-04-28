@@ -212,6 +212,13 @@ class SettingsDialog(QDialog):
         self.api_key_edit = QLineEdit()
         self.api_key_edit.setEchoMode(QLineEdit.Password)
         self.api_key_edit.setPlaceholderText(translate("SettingsDialog", "API key, file:/path/to/token, or cmd:command"))
+        self.api_key_edit.setToolTip(translate(
+            "SettingsDialog",
+            "For secure storage, prefix the value with:\n"
+            "  file:/path/to/keyfile  — read key from a file (re-read each call)\n"
+            "  cmd:some command        — run command, use stdout as the key\n"
+            "Example: cmd:secret-tool lookup service freecad-ai username anthropic"
+        ))
         provider_layout.addRow(translate("SettingsDialog", "API Key:"), self.api_key_edit)
 
         self.base_url_edit = QLineEdit()

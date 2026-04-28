@@ -64,12 +64,23 @@ Restart FreeCAD. The **FreeCAD AI** workbench will appear in the workbench selec
 
 ## Configuration
 
-1. Switch to the FreeCAD AI workbench
-2. Click the gear icon to open settings
-3. Select your LLM provider and enter your API key (if needed)
-4. Click **Test Connection** to verify
+There are two ways to configure FreeCAD AI:
 
-Configuration is stored at `~/.config/FreeCAD/FreeCADAI/config.json`.
+- **Edit → Preferences → FreeCAD AI** — provider, model, API key, max tokens, mode, thinking, and tool calling. Persists to FreeCAD's parameter store and mirrors into the workbench config on next load.
+- **Workbench Settings dialog** (gear icon in the chat panel) — everything above plus MCP servers, tool reranking, viewport capture, model parameters, hooks, system prompt overrides, and dock layout.
+
+Both UIs stay in sync. Configuration is stored at `~/.config/FreeCAD/FreeCADAI/config.json`.
+
+### Secure API key storage
+
+API keys can be entered as plain text, but for shared machines, repos, or backups, the key field accepts two prefixes that keep the secret out of the config file:
+
+| Prefix | Behavior | Example |
+|---|---|---|
+| `file:` | Read key from a file (re-read on every API call) | `file:/home/me/.config/anthropic-key` |
+| `cmd:` | Run command, use stdout as the key | `cmd:secret-tool lookup service freecad-ai username anthropic` |
+
+The `cmd:` form lets you store keys in your OS's native secret store (libsecret/Keychain/Credential Manager) and pull them via the standard CLI (`secret-tool`, `security`, `cmdkey`).
 
 ### Supported Providers
 
