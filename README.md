@@ -73,14 +73,33 @@ Both UIs stay in sync. Configuration is stored at `~/.config/FreeCAD/FreeCADAI/c
 
 ### Secure API key storage
 
-API keys can be entered as plain text, but for shared machines, repos, or backups, the key field accepts two prefixes that keep the secret out of the config file:
+API keys can be entered as plain text, but for shared machines, repos, or backups, the key field accepts two prefixes that keep the secret out of the config file. Both work on Linux, macOS, and Windows.
 
-| Prefix | Behavior | Example |
+**`file:` — read key from a file** (re-read on every API call). Path supports `~` and OS env vars (`$HOME`, `%APPDATA%`).
+
+| OS | Example |
+|---|---|
+| Linux/macOS | `file:~/.config/anthropic-key` |
+| Windows | `file:%APPDATA%\freecad-ai\anthropic-key.txt` |
+
+Lock the file down with filesystem permissions (`chmod 600` on Unix, file-properties → security on Windows).
+
+**`cmd:` — run a command, use its stdout as the key.** Lets you pull from the OS's native secret store via that store's CLI:
+
+| OS | Native store | Example |
 |---|---|---|
-| `file:` | Read key from a file (re-read on every API call) | `file:/home/me/.config/anthropic-key` |
-| `cmd:` | Run command, use stdout as the key | `cmd:secret-tool lookup service freecad-ai username anthropic` |
+| Linux | libsecret (GNOME Keyring, KWallet) via `libsecret-tools` | `cmd:secret-tool lookup service freecad-ai account anthropic` |
+| macOS | Keychain | `cmd:security find-generic-password -a anthropic -s freecad-ai -w` |
+| Windows | Credential Manager (needs the [`CredentialManager` PowerShell module][CM]) | `cmd:powershell -Command "(Get-StoredCredential -Target 'freecad-ai-anthropic').GetNetworkCredential().Password"` |
+| Any | GPG | `cmd:gpg --decrypt ~/keys/anthropic.gpg` |
 
-The `cmd:` form lets you store keys in your OS's native secret store (libsecret/Keychain/Credential Manager) and pull them via the standard CLI (`secret-tool`, `security`, `cmdkey`).
+To populate the stores once:
+
+- **Linux:** `secret-tool store --label="freecad-ai anthropic" service freecad-ai account anthropic`
+- **macOS:** `security add-generic-password -a anthropic -s freecad-ai -w 'sk-ant-…'`
+- **Windows (PowerShell):** `New-StoredCredential -Target 'freecad-ai-anthropic' -UserName anthropic -Password (Read-Host -AsSecureString)`
+
+[CM]: https://www.powershellgallery.com/packages/CredentialManager
 
 ### Supported Providers
 

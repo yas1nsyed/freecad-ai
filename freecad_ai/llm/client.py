@@ -175,7 +175,9 @@ class LLMClient:
             return ""
 
         if key.startswith("file:"):
-            path = os.path.expanduser(key[5:].strip())
+            # Expand both ~ (all OSes) and env vars like %APPDATA% / $HOME
+            # so Windows users can write "file:%APPDATA%\\freecad-ai\\key".
+            path = os.path.expandvars(os.path.expanduser(key[5:].strip()))
             try:
                 with open(path) as f:
                     token = f.read().strip()

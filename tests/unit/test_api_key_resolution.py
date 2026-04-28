@@ -53,6 +53,17 @@ class TestResolveApiKey:
         client = _make_client("file:~/token.txt")
         assert client._resolve_api_key() == "tilde-token"
 
+    def test_file_prefix_env_var_expansion(self, tmp_path, monkeypatch):
+        """Windows users write file:%APPDATA%\\... — env vars must expand."""
+        token_file = tmp_path / "token.txt"
+        token_file.write_text("env-var-token")
+        # POSIX-style $VAR works on every OS via os.path.expandvars; the
+        # Windows-style %VAR% form is also supported but only resolves on
+        # Windows. Test the cross-platform $VAR form here.
+        monkeypatch.setenv("FREECAD_AI_TEST_DIR", str(tmp_path))
+        client = _make_client("file:$FREECAD_AI_TEST_DIR/token.txt")
+        assert client._resolve_api_key() == "env-var-token"
+
     def test_cmd_prefix(self):
         client = _make_client("cmd:echo my-token")
         assert client._resolve_api_key() == "my-token"
