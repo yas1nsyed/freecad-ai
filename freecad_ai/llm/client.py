@@ -236,11 +236,45 @@ class LLMClient:
         test_messages = [{"role": "user", "content": "Say 'hello' in one word."}]
         return self.send(test_messages, system="Respond briefly.")
 
-    def vision_probe(self) -> bool:
-        """Test if the model supports vision by sending an image with a number.
+    def _ollama_capabilities(self) -> set[str] | None:
+        """Query Ollama's /api/show for the model's capabilities array.
 
-        Returns True if the model correctly identifies the number, False otherwise.
+        Returns a set like {"completion", "tools", "vision"} or None if the
+        call fails (server unreachable, model not pulled, older Ollama
+        without capabilities support, etc.). /api/show is at the host
+        root, not under /v1 — strip /v1 if the configured base_url has it.
         """
+        if self.provider_name != "ollama":
+            return None
+        base = self.base_url
+        if base.endswith("/v1"):
+            base = base[:-3]
+        url = f"{base}/api/show"
+        try:
+            data = self._http_post(
+                url, {"Content-Type": "application/json"}, {"model": self.model}
+            )
+        except Exception:
+            return None
+        caps = data.get("capabilities")
+        if isinstance(caps, list):
+            return {str(c).lower() for c in caps}
+        return None
+
+    def vision_probe(self) -> bool:
+        """Test if the model supports vision.
+
+        For Ollama, prefer the structured /api/show capability check —
+        the behavioral OCR probe below is too fragile for vision models
+        that handle real images fine but struggle to read tiny text in a
+        64×32 PNG. For other providers, fall back to the behavioral probe.
+        """
+        if self.provider_name == "ollama":
+            caps = self._ollama_capabilities()
+            if caps is not None:
+                return "vision" in caps
+            # capability call failed (older Ollama, transient network) →
+            # fall through to the behavioral probe rather than give up
         try:
             number, png_bytes = _generate_probe_image()
             b64 = base64.b64encode(png_bytes).decode("ascii")

@@ -115,6 +115,87 @@ class TestVisionProbeMethod:
             assert client.vision_probe() is False
 
 
+class TestOllamaCapabilities:
+    """LLMClient._ollama_capabilities() and ollama path of vision_probe."""
+
+    def test_capabilities_returns_none_for_non_ollama(self):
+        from freecad_ai.llm.client import LLMClient
+        client = LLMClient("openai", "http://localhost/v1", "", "gpt-4o")
+        assert client._ollama_capabilities() is None
+
+    def test_capabilities_strips_v1_suffix(self):
+        from freecad_ai.llm.client import LLMClient
+        client = LLMClient("ollama", "http://localhost:11434/v1", "", "qwen2.5vl:7b")
+        captured = {}
+
+        def fake_post(url, headers, body):
+            captured["url"] = url
+            captured["body"] = body
+            return {"capabilities": ["completion", "vision"]}
+
+        with patch.object(client, "_http_post", side_effect=fake_post):
+            caps = client._ollama_capabilities()
+
+        assert captured["url"] == "http://localhost:11434/api/show"
+        assert captured["body"] == {"model": "qwen2.5vl:7b"}
+        assert caps == {"completion", "vision"}
+
+    def test_capabilities_handles_no_v1_suffix(self):
+        from freecad_ai.llm.client import LLMClient
+        client = LLMClient("ollama", "http://localhost:11434", "", "gemma3:12b")
+        captured = {}
+
+        def fake_post(url, headers, body):
+            captured["url"] = url
+            return {"capabilities": ["vision"]}
+
+        with patch.object(client, "_http_post", side_effect=fake_post):
+            client._ollama_capabilities()
+
+        assert captured["url"] == "http://localhost:11434/api/show"
+
+    def test_capabilities_returns_none_on_http_error(self):
+        from freecad_ai.llm.client import LLMClient, LLMError
+        client = LLMClient("ollama", "http://localhost:11434/v1", "", "qwen2.5vl:7b")
+        with patch.object(client, "_http_post", side_effect=LLMError("404")):
+            assert client._ollama_capabilities() is None
+
+    def test_capabilities_returns_none_when_field_missing(self):
+        """Older Ollama versions don't return a capabilities key at all."""
+        from freecad_ai.llm.client import LLMClient
+        client = LLMClient("ollama", "http://localhost:11434/v1", "", "qwen2.5vl:7b")
+        with patch.object(client, "_http_post", return_value={"modelfile": "..."}):
+            assert client._ollama_capabilities() is None
+
+    def test_vision_probe_uses_capabilities_for_ollama_vision(self):
+        """If Ollama says vision is supported, return True without behavioral probe."""
+        from freecad_ai.llm.client import LLMClient
+        client = LLMClient("ollama", "http://localhost:11434/v1", "", "qwen2.5vl:7b")
+        with patch.object(client, "_ollama_capabilities", return_value={"completion", "vision"}):
+            with patch.object(client, "send") as mock_send:
+                assert client.vision_probe() is True
+                mock_send.assert_not_called()  # behavioral probe skipped
+
+    def test_vision_probe_uses_capabilities_for_ollama_no_vision(self):
+        """If Ollama says vision isn't supported, return False without behavioral probe."""
+        from freecad_ai.llm.client import LLMClient
+        client = LLMClient("ollama", "http://localhost:11434/v1", "", "llama3")
+        with patch.object(client, "_ollama_capabilities", return_value={"completion", "tools"}):
+            with patch.object(client, "send") as mock_send:
+                assert client.vision_probe() is False
+                mock_send.assert_not_called()
+
+    @patch("freecad_ai.llm.client._generate_probe_image")
+    def test_vision_probe_falls_back_to_behavioral_when_caps_unavailable(self, mock_gen):
+        """Older Ollama (no capabilities field) → fall back to OCR probe."""
+        from freecad_ai.llm.client import LLMClient
+        mock_gen.return_value = (427, b'\x89PNG\r\n\x1a\nfakedata')
+        client = LLMClient("ollama", "http://localhost:11434/v1", "", "old-model")
+        with patch.object(client, "_ollama_capabilities", return_value=None):
+            with patch.object(client, "send", return_value="427"):
+                assert client.vision_probe() is True
+
+
 class TestFallbackDiscovery:
     """MCP fallback tool search."""
 
