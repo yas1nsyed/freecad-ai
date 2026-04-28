@@ -24,7 +24,7 @@ An AI-powered assistant workbench for FreeCAD that creates and modifies
 
 ## Getting Started
 
-1. Install via the Addon Manager or clone into `~/.local/share/FreeCAD/Mod/`
+1. Clone or symlink this repository into `~/.local/share/FreeCAD/Mod/freecad-ai` (see README for OS-specific paths). The workbench isn't in the FreeCAD Addon Manager registry yet.
 2. Switch to the **FreeCAD AI** workbench
 3. Open settings (gear icon) and configure your LLM provider
 4. Start chatting — ask it to create geometry, modify parts, or explain FreeCAD concepts
