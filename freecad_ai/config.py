@@ -70,6 +70,13 @@ class AppConfig:
     system_prompt_override: str = ""  # empty = use default; non-empty = use as-is
     vision_detected: bool | None = None   # None=not tested, True/False=probe result
     vision_override: bool | None = None   # user manual override, takes precedence
+    # Tool-calling capability (Ollama /api/show "tools"). None=untested or
+    # non-Ollama (in which case provider.supports_tools is the source of truth).
+    # False explicitly = the model doesn't support tools (e.g. embedding/reranker
+    # picked as main model) → suppress tools array in chat sends.
+    tools_detected: bool | None = None
+    # Thinking capability (Ollama /api/show "thinking"). Diagnostic-only today.
+    thinking_detected: bool | None = None
 
     # Tool reranking — when active, only the top-N most relevant tools
     # (plus pinned tools) are sent to the LLM on each user turn. Saves
@@ -108,6 +115,20 @@ class AppConfig:
         if self.vision_detected is not None:
             return self.vision_detected
         return False
+
+    @property
+    def supports_tools(self) -> bool:
+        """Whether the current LLM supports tool calling.
+
+        Detected capability (from Ollama /api/show) takes precedence — it
+        catches the case where someone picks an embedding/reranker model
+        as the main model on a provider that the static table marks as
+        tool-capable. Otherwise fall back to the provider-wide flag.
+        """
+        if self.tools_detected is not None:
+            return self.tools_detected
+        from .llm.providers import supports_tools as _provider_supports_tools
+        return _provider_supports_tools(self.provider.name)
 
     def to_dict(self) -> dict:
         return asdict(self)

@@ -1637,8 +1637,11 @@ class ChatDockWidget(QDockWidget):
         mode = "plan" if self.mode_combo.currentIndex() == 0 else "act"
         cfg = get_config()
 
-        # Determine if we should use tools
-        use_tools = cfg.enable_tools and mode == "act"
+        # Determine if we should use tools. cfg.supports_tools combines the
+        # provider-wide flag with per-model detection from /api/show — so an
+        # Ollama embedding/reranker accidentally selected as the main model
+        # won't get tools sent to it.
+        use_tools = cfg.enable_tools and mode == "act" and cfg.supports_tools
         tools_schema = None
         api_style = "openai"
 

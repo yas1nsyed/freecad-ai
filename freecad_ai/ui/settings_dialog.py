@@ -44,9 +44,10 @@ from ..llm.providers import get_provider_names
 
 
 class _TestConnectionThread(QThread):
-    """Background thread for testing LLM connection and vision capability."""
+    """Background thread for testing LLM connection and detecting capabilities."""
     finished = Signal(bool, str)        # success, message
     vision_result = Signal(bool)        # vision probe result
+    capabilities_result = Signal(dict)  # full caps dict (Ollama: vision/tools/thinking)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -58,9 +59,9 @@ class _TestConnectionThread(QThread):
             response = client.test_connection()
             self.finished.emit(True, translate("SettingsDialog", "Connected! Response: ") + response)
 
-            # Run vision probe after successful connection
-            vision_ok = client.vision_probe()
-            self.vision_result.emit(vision_ok)
+            caps = client.detect_capabilities()
+            self.vision_result.emit(bool(caps.get("vision", False)))
+            self.capabilities_result.emit(caps)
         except Exception as e:
             self.finished.emit(False, str(e))
 
@@ -1042,10 +1043,13 @@ class SettingsDialog(QDialog):
         # Vision override
         if hasattr(self, '_vision_override_value'):
             cfg.vision_override = self._vision_override_value
-        # Reset vision_detected if provider or model changed
+        # Reset all detected capabilities if provider or model changed —
+        # the previous probe results are about a different model.
         if (hasattr(self, '_original_provider') and cfg.provider.name != self._original_provider) or \
            (hasattr(self, '_original_model') and cfg.provider.model != self._original_model):
             cfg.vision_detected = None
+            cfg.tools_detected = None
+            cfg.thinking_detected = None
 
         cfg.mcp_servers = list(self._mcp_configs) if hasattr(self, "_mcp_configs") else []
         cfg.scan_freecad_macros = self.scan_macros_cb.isChecked()
@@ -1269,6 +1273,7 @@ class SettingsDialog(QDialog):
         self._test_thread = _TestConnectionThread(self)
         self._test_thread.finished.connect(self._on_test_finished)
         self._test_thread.vision_result.connect(self._on_vision_probed)
+        self._test_thread.capabilities_result.connect(self._on_capabilities_detected)
         self._test_thread.start()
 
     def _on_test_finished(self, success, message):
@@ -1307,6 +1312,36 @@ class SettingsDialog(QDialog):
             FreeCAD.Console.PrintMessage(f"FreeCAD AI: {vision_msg}\n")
         except ImportError:
             pass
+
+    def _on_capabilities_detected(self, caps: dict):
+        """Handle full capabilities dict (Ollama only emits tools/thinking).
+
+        Persists tools_detected/thinking_detected to config and appends a
+        readable summary to the test status. Non-Ollama providers emit
+        only "vision" — tools/thinking stay None to keep falling back to
+        the provider-wide static flag.
+        """
+        cfg = get_config()
+        if "tools" in caps:
+            cfg.tools_detected = bool(caps["tools"])
+        if "thinking" in caps:
+            cfg.thinking_detected = bool(caps["thinking"])
+        save_current_config()
+
+        # Build a single-line summary for the status label
+        parts = []
+        if "tools" in caps:
+            parts.append(f"tools: {'yes' if caps['tools'] else 'no'}")
+        if "thinking" in caps:
+            parts.append(f"thinking: {'yes' if caps['thinking'] else 'no'}")
+        if parts:
+            line = translate("SettingsDialog", "Capabilities: ") + ", ".join(parts)
+            self.test_status.setText(self.test_status.text() + "\n" + line)
+            try:
+                import FreeCAD
+                FreeCAD.Console.PrintMessage(f"FreeCAD AI: {line}\n")
+            except ImportError:
+                pass
 
     def _save_temp(self):
         """Temporarily apply current UI values to config (for test connection)."""

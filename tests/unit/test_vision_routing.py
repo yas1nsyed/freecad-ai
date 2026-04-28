@@ -195,6 +195,89 @@ class TestOllamaCapabilities:
             with patch.object(client, "send", return_value="427"):
                 assert client.vision_probe() is True
 
+    def test_capabilities_cached_per_instance(self):
+        """Repeated calls share one /api/show round-trip."""
+        from freecad_ai.llm.client import LLMClient
+        client = LLMClient("ollama", "http://localhost:11434/v1", "", "qwen2.5vl:7b")
+        with patch.object(client, "_http_post", return_value={"capabilities": ["vision"]}) as mock_post:
+            client._ollama_capabilities()
+            client._ollama_capabilities()
+            client._ollama_capabilities()
+            assert mock_post.call_count == 1
+
+
+class TestDetectCapabilities:
+    """LLMClient.detect_capabilities() unified entry point."""
+
+    def test_ollama_returns_full_dict_from_api_show(self):
+        from freecad_ai.llm.client import LLMClient
+        client = LLMClient("ollama", "http://localhost:11434/v1", "", "qwen3-vl:32b")
+        with patch.object(
+            client, "_ollama_capabilities",
+            return_value={"completion", "tools", "vision", "thinking"},
+        ):
+            caps = client.detect_capabilities()
+        assert caps == {"vision": True, "tools": True, "thinking": True}
+
+    def test_ollama_no_caps_falls_back_to_behavioral_vision_only(self):
+        """Older Ollama without capabilities field → only vision via OCR probe.
+
+        tools/thinking should NOT be in the dict, so the Settings receiver
+        leaves tools_detected/thinking_detected as None and the provider-wide
+        static flag stays in effect for tool calling.
+        """
+        from freecad_ai.llm.client import LLMClient
+        client = LLMClient("ollama", "http://localhost:11434/v1", "", "old-ollama")
+        with patch.object(client, "_ollama_capabilities", return_value=None):
+            with patch.object(client, "vision_probe", return_value=False):
+                caps = client.detect_capabilities()
+        assert caps == {"vision": False}
+        assert "tools" not in caps
+        assert "thinking" not in caps
+
+    def test_non_ollama_only_returns_vision(self):
+        """OpenAI/Anthropic/etc only get vision via behavioral probe."""
+        from freecad_ai.llm.client import LLMClient
+        client = LLMClient("openai", "https://api.openai.com/v1", "key", "gpt-4o")
+        with patch.object(client, "vision_probe", return_value=True):
+            caps = client.detect_capabilities()
+        assert caps == {"vision": True}
+
+
+class TestSupportsToolsConfig:
+    """AppConfig.supports_tools combines static flag with detected override."""
+
+    def test_supports_tools_uses_detected_when_set(self):
+        from freecad_ai.config import AppConfig
+        cfg = AppConfig()
+        cfg.provider.name = "ollama"  # statically marked tool-capable
+        cfg.tools_detected = False    # detected: model doesn't support tools
+        assert cfg.supports_tools is False
+
+    def test_supports_tools_falls_back_to_provider_when_untested(self):
+        from freecad_ai.config import AppConfig
+        cfg = AppConfig()
+        cfg.provider.name = "anthropic"
+        cfg.tools_detected = None
+        assert cfg.supports_tools is True  # anthropic provider flag is True
+
+    def test_supports_tools_detected_true_overrides_provider(self):
+        from freecad_ai.config import AppConfig
+        cfg = AppConfig()
+        cfg.provider.name = "openrouter"
+        cfg.tools_detected = True
+        assert cfg.supports_tools is True
+
+    def test_tools_detected_roundtrip_json(self):
+        from freecad_ai.config import AppConfig
+        cfg = AppConfig()
+        cfg.tools_detected = True
+        cfg.thinking_detected = False
+        d = cfg.to_dict()
+        cfg2 = AppConfig.from_dict(d)
+        assert cfg2.tools_detected is True
+        assert cfg2.thinking_detected is False
+
 
 class TestFallbackDiscovery:
     """MCP fallback tool search."""

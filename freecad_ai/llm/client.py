@@ -77,11 +77,15 @@ def _generate_probe_image() -> tuple[int, bytes]:
         if _QtCore.QCoreApplication.instance() is None:
             raise RuntimeError("No QApplication")
 
-        img = QImage(64, 32, QImage.Format_RGB32)
+        # 128x64 / 32pt: empirically clean threshold. 64x32 sat right
+        # at qwen3-vl's preprocessing cliff (anything smaller returned
+        # an empty response in 0.1s — image rejected before inference).
+        # 128x64 gives 4x area headroom while still being <1KB PNG.
+        img = QImage(128, 64, QImage.Format_RGB32)
         img.fill(QColor(255, 255, 255))
         painter = QPainter(img)
         painter.setPen(QColor(0, 0, 0))
-        font = QFont("Sans", 16)
+        font = QFont("Sans", 32)
         font.setBold(True)
         painter.setFont(font)
         painter.drawText(img.rect(), Qt.AlignCenter, str(number))
@@ -243,9 +247,14 @@ class LLMClient:
         call fails (server unreachable, model not pulled, older Ollama
         without capabilities support, etc.). /api/show is at the host
         root, not under /v1 — strip /v1 if the configured base_url has it.
+
+        Result is cached on the instance so callers (vision_probe,
+        detect_capabilities, settings dialog) don't each pay a round trip.
         """
         if self.provider_name != "ollama":
             return None
+        if hasattr(self, "_ollama_caps_cache"):
+            return self._ollama_caps_cache
         base = self.base_url
         if base.endswith("/v1"):
             base = base[:-3]
@@ -255,11 +264,31 @@ class LLMClient:
                 url, {"Content-Type": "application/json"}, {"model": self.model}
             )
         except Exception:
+            self._ollama_caps_cache = None
             return None
         caps = data.get("capabilities")
-        if isinstance(caps, list):
-            return {str(c).lower() for c in caps}
-        return None
+        result = {str(c).lower() for c in caps} if isinstance(caps, list) else None
+        self._ollama_caps_cache = result
+        return result
+
+    def detect_capabilities(self) -> dict:
+        """Detect provider/model capabilities for the Settings dialog.
+
+        Returns a dict with at least "vision" set. For Ollama with
+        /api/show available, also includes "tools" and "thinking" as
+        explicit booleans. For non-Ollama providers, only "vision" is
+        populated (via the behavioral OCR probe) — tools support comes
+        from the provider-wide static flag, no per-model detection.
+        """
+        if self.provider_name == "ollama":
+            caps = self._ollama_capabilities()
+            if caps is not None:
+                return {
+                    "vision": "vision" in caps,
+                    "tools": "tools" in caps,
+                    "thinking": "thinking" in caps,
+                }
+        return {"vision": self.vision_probe()}
 
     def vision_probe(self) -> bool:
         """Test if the model supports vision.
