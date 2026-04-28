@@ -5,7 +5,7 @@
     <version>0.11.1-alpha</version>
     <date>2026-04-28</date>
     <maintainer email="alfred@mickautsch.de">Alfred Mickautsch</maintainer>
-    <license file="LICENSE-CODE">LGPL-2.1</license>
+    <license file="LICENSE-CODE">LGPL-2.1-or-later</license>
     <license file="LICENSE-ICON">CC0-1.0</license>
     <icon>resources/icons/freecad_ai.svg</icon>
     <url type="repository" branch="master">https://github.com/ghbalf/freecad-ai</url>

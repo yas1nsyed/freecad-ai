@@ -70,9 +70,16 @@ def _generate_probe_image() -> tuple[int, bytes]:
     """
     number = random.randint(100, 999)
     try:
-        from PySide2.QtGui import QImage, QPainter, QFont, QColor
-        from PySide2.QtCore import Qt
-        from PySide2 import QtCore as _QtCore
+        # Use the compat shim — FreeCAD 1.0+ ships PySide6, older builds use
+        # PySide2. Hard-coding PySide2 here silently fell through to the 1x1
+        # pixel fallback on FreeCAD 1.1.0, breaking OCR-based vision probing
+        # for non-Ollama providers.
+        from ..ui.compat import QtCore as _QtCore, QtGui as _QtGui
+        QImage = _QtGui.QImage
+        QPainter = _QtGui.QPainter
+        QFont = _QtGui.QFont
+        QColor = _QtGui.QColor
+        Qt = _QtCore.Qt
         # Require a running QCoreApplication — if none exists Qt may crash
         if _QtCore.QCoreApplication.instance() is None:
             raise RuntimeError("No QApplication")
