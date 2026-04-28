@@ -302,6 +302,83 @@ class TestParamStoreBridge:
             _apply_param_store_overrides(cfg)
         assert cfg.mode == "plan"
 
+    def test_load_config_seeds_empty_param_store_from_json(self, tmp_path, monkeypatch):
+        """Regression: Edit → Preferences was showing blank fields when JSON
+        had values but the param store was empty (e.g., user upgraded from
+        v0.11.x where ParamGet bridge didn't exist). load_config must seed
+        the param store from JSON so Gui::Pref* widgets see current values.
+        """
+        from unittest.mock import patch
+        import freecad_ai.config as config_mod
+
+        cfg_dir = tmp_path / "FreeCADAI"
+        cfg_dir.mkdir()
+        cfg_file = cfg_dir / "config.json"
+        cfg_file.write_text(json.dumps({
+            "provider": {
+                "name": "ollama",
+                "model": "qwen3-vl:32b",
+                "base_url": "http://spark:11434/v1",
+                "api_key": "cmd:secret-tool lookup service freecad-ai",
+            },
+            "mode": "act",
+            "thinking": "on",
+            "max_tokens": 8192,
+            "enable_tools": False,
+        }))
+        monkeypatch.setattr(config_mod, "CONFIG_FILE", str(cfg_file))
+        monkeypatch.setattr(config_mod, "CONFIG_DIR", str(cfg_dir))
+
+        group, ints, strings, bools = self._fake_param_group()  # empty store
+        with patch.object(config_mod, "_get_param_group", return_value=group):
+            cfg = config_mod.load_config()
+
+        # JSON values land in the in-memory cfg
+        assert cfg.provider.name == "ollama"
+        assert cfg.provider.model == "qwen3-vl:32b"
+        assert cfg.provider.base_url == "http://spark:11434/v1"
+        assert cfg.mode == "act"
+
+        # Param store now mirrors JSON — Edit → Preferences will read these
+        assert ints.get("ProviderIndex") == config_mod._PARAM_PROVIDERS.index("ollama")
+        assert strings.get("Model") == "qwen3-vl:32b"
+        assert strings.get("BaseUrl") == "http://spark:11434/v1"
+        assert strings.get("ApiKey") == "cmd:secret-tool lookup service freecad-ai"
+        assert ints.get("ModeIndex") == config_mod._PARAM_MODES.index("act")
+        assert ints.get("ThinkingIndex") == config_mod._PARAM_THINKING.index("on")
+        assert ints.get("MaxTokens") == 8192
+        assert bools.get("EnableTools") is False
+
+    def test_load_config_param_store_wins_over_json(self, tmp_path, monkeypatch):
+        """If the user changed a value in Edit → Preferences (param store)
+        and JSON has a different value, the param-store value wins on load.
+        After seeding, both surfaces reflect the param-store value.
+        """
+        from unittest.mock import patch
+        import freecad_ai.config as config_mod
+
+        cfg_dir = tmp_path / "FreeCADAI"
+        cfg_dir.mkdir()
+        cfg_file = cfg_dir / "config.json"
+        cfg_file.write_text(json.dumps({
+            "provider": {"name": "anthropic", "model": "claude-sonnet-4-20250514"},
+            "max_tokens": 4096,
+        }))
+        monkeypatch.setattr(config_mod, "CONFIG_FILE", str(cfg_file))
+        monkeypatch.setattr(config_mod, "CONFIG_DIR", str(cfg_dir))
+
+        group, ints, strings, bools = self._fake_param_group(
+            ints={"ProviderIndex": config_mod._PARAM_PROVIDERS.index("ollama"), "MaxTokens": 16384},
+            strings={"Model": "qwen3-vl:32b"},
+        )
+        with patch.object(config_mod, "_get_param_group", return_value=group):
+            cfg = config_mod.load_config()
+
+        # ParamGet wins — preference page changes survive
+        assert cfg.provider.name == "ollama"
+        assert cfg.provider.model == "qwen3-vl:32b"
+        assert cfg.max_tokens == 16384
+
     def test_write_to_param_store_round_trips(self):
         """Write then re-apply via overrides — values come back identical."""
         from freecad_ai.config import (

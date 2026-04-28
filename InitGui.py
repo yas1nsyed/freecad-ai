@@ -119,6 +119,16 @@ try:
 except Exception:
     pass
 
+# Seed the FreeCAD parameter store from JSON so the preferences page shows
+# current values even when the user goes straight to Edit → Preferences
+# without first activating the workbench. load_config writes JSON values to
+# the param store, where the Gui::Pref* widgets read from.
+try:
+    from freecad_ai.config import get_config as _gcfg
+    _gcfg()
+except Exception:
+    pass
+
 Gui.addCommand("FreeCADAI_OpenChat", OpenChatCommand())
 Gui.addCommand("FreeCADAI_OpenSettings", OpenSettingsCommand())
 Gui.addWorkbench(FreeCADAIWorkbench())

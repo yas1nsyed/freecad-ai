@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.12.1-alpha] - 2026-04-28
+
+Patch release fixing the Edit → Preferences page showing blank fields after a v0.12.0 install.
+
+### Fixed
+
+- **Edit → Preferences → FreeCAD AI page showed empty fields when JSON config was already populated** — `Gui::Pref*` widgets read directly from FreeCAD's parameter store at `BaseApp/Preferences/Mod/FreeCADAI`, but `_write_to_param_store` only fired when the user clicked Save in the AI Settings dialog. Users who upgraded from v0.11.x or earlier (where the bridge didn't exist) saw blanks on the preferences page until they re-saved through the dialog. `load_config` now mirrors the merged JSON+ParamGet result back to the param store on every load, so both UIs stay coherent on first activation. `InitGui.py` also calls `get_config()` after registering the preferences page so the seeding happens even when the user opens Edit → Preferences before activating the workbench.
+
 ## [0.12.0-alpha] - 2026-04-28
 
 FreeCAD addon-index conformance — preparation for Addon Manager submission. Adds a FreeCAD-native preferences page (the convention every indexed workbench follows), promotes the existing `file:` / `cmd:` API-key indirection through documentation and tooltips, and fixes a silently-degrading PySide2 hard import that broke vision detection on FreeCAD 1.1.0 for non-Ollama providers.

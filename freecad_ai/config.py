@@ -156,6 +156,12 @@ def load_config() -> AppConfig:
     store (BaseApp/Preferences/Mod/FreeCADAI) on top — so changes the user
     made via Edit → Preferences propagate to the workbench's settings on
     next load even though they're written by FreeCAD's Pref* widgets.
+
+    Then mirrors the merged result back to the parameter store so the
+    Edit → Preferences page (which reads Pref* widgets directly from the
+    param store) reflects current values. Without this, users upgrading
+    from a version without the bridge would see blank fields in the
+    preferences page until they saved through the AI Settings dialog.
     """
     _ensure_dirs()
     cfg = AppConfig()
@@ -167,6 +173,7 @@ def load_config() -> AppConfig:
         except (json.JSONDecodeError, TypeError, KeyError):
             pass
     _apply_param_store_overrides(cfg)
+    _write_to_param_store(cfg)
     return cfg
 
 
