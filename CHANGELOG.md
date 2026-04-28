@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.11.1-alpha] - 2026-04-28
+
+Patch release fixing Ollama vision detection and extending the same `/api/show` capability check to tool calling and thinking. Reported by @MuhvICo on issue #8.
+
+### Fixed
+
+- **Ollama vision falsely reported as unsupported** — the previous `vision_probe()` rendered a 64×32 PNG with a 3-digit number and asked the model to OCR it. Many vision-capable models (qwen2.5vl, qwen3-vl, gemma4) handle real photos fine but choke on tiny low-resolution text, producing false negatives. The probe now consults Ollama's native `/api/show` endpoint for the model's `capabilities` array — authoritative for that provider — and only falls back to the OCR probe when `/api/show` is unavailable (older Ollama, transient errors).
+
+### Added
+
+- **Per-model tool-calling and thinking detection** — `/api/show` capabilities also surface `"tools"` and `"thinking"` per model. `AppConfig.supports_tools` now consults `tools_detected` before the provider-wide static flag, so accidentally selecting an Ollama embedding/reranker model (`nomic-embed-text`, `*reranker*`) as the main chat model no longer ships a tools array to a model that can't use it.
+- **Capabilities summary in Settings dialog** — Test Connection now appends a one-liner like "Capabilities: tools: yes, thinking: no" to the status label and persists `tools_detected` / `thinking_detected` alongside `vision_detected`. All three reset when the user changes provider or model.
+
+### Changed
+
+- **Behavioral OCR probe enlarged from 64×32 / 16pt to 128×64 / 32pt** — empirical sweep against `qwen3-vl:32b` and `gemma3:4b` showed 64×32 sat right at qwen3-vl's image-preprocessing cliff (smaller inputs returned empty content in 0.1s — image rejected before inference). 128×64 gives 4× area headroom, both tested models hit 100%, PNG stays under 1KB. Only matters for non-Ollama providers and older Ollama without `/api/show`.
+
 ## [0.11.0-alpha] - 2026-04-23
 
 Plan-mode feedback loop for local-LLM users: sandbox validation that catches FreeCAD's C++ console errors, Check and Fix-with-AI buttons in the Review Code dialog, and viewport screenshots attached to error-retry messages. Plus dock layout persistence — the chat widget now remembers its area, tab siblings, and floating geometry across sessions.
