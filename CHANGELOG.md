@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.12.0-alpha] - 2026-04-28
+
+FreeCAD addon-index conformance — preparation for Addon Manager submission. Adds a FreeCAD-native preferences page (the convention every indexed workbench follows), promotes the existing `file:` / `cmd:` API-key indirection through documentation and tooltips, and fixes a silently-degrading PySide2 hard import that broke vision detection on FreeCAD 1.1.0 for non-Ollama providers.
+
+### Added
+
+- **Edit → Preferences → FreeCAD AI page** — a FreeCAD-native preferences entry point with 8 fields (provider, base URL, model, API key, max tokens, mode, thinking, enable tools), registered via `Gui.addPreferencePage` and backed by `Gui::Pref*` widgets that auto-save into FreeCAD's `BaseApp/Preferences/Mod/FreeCADAI` parameter store. Coexists with the existing AI Settings dialog: the dialog remains primary and exposes the full surface (MCP, skills, hooks, system prompt, model parameters, etc.); the preferences page exposes only the basics that map naturally to FreeCAD's flat parameter store.
+- **ParamGet ↔ JSON config bridge** — `_apply_param_store_overrides` on load and `_write_to_param_store` on save keep both UIs in sync without restructuring the config layer. JSON stays primary (nested `mcp_servers`, `model_params`, dock state base64 don't flatten cleanly to ParamGet). Out-of-range enum indices in ParamGet are ignored defensively in case a user hand-edited the param file.
+- **Cross-OS environment-variable expansion in `file:` API key prefix** — `os.path.expandvars` runs alongside `os.path.expanduser`, so `file:%APPDATA%\\freecad-ai\\token` works on Windows in addition to the existing `file:~/...` and `file:$HOME/...` syntaxes.
+- **Secure API key storage UX** — README and the new preferences page both promote the existing `file:` / `cmd:` prefixes with per-OS examples (Linux `secret-tool`, macOS `security`, Windows CredentialManager / GPG-symmetric / DPAPI). Settings dialog API-key field gets a rich tooltip with the same examples. The maintainer is Linux-only — macOS and Windows examples ship with an explicit "untested" disclaimer.
+
+### Fixed
+
+- **PySide2 hard import in `_generate_probe_image` silently downgraded vision detection on FreeCAD 1.1.0** — the function had `from PySide2.QtGui import QImage, ...` inside a try/except. On FreeCAD 1.1.0 (PySide6 only) the ImportError fell through to a 1×1 white-pixel fallback meant for headless unit tests, and every non-Ollama provider's vision probe ran against that pixel — getting `vision_detected = False` regardless of actual model capability. Now routes through `freecad_ai/ui/compat.py`. The 1×1 fallback still exists for genuinely Qt-less environments but now logs a warning when it activates.
+
+### Changed
+
+- **License SPDX identifier normalized to `LGPL-2.1-or-later`** — the bare `LGPL-2.1` form normalizes to a non-FSF-Libre identifier per the FreeCAD addon Qualities checklist. License text in `LICENSE-CODE` is unchanged; only the `package.xml` `<license>` element was updated.
+
+### Docs
+
+- **Install instructions corrected** — `Resources/Documents/Overview.md` previously claimed Addon Manager install was available. It is not: the workbench is not in any FreeCAD addon registry yet. Submission is in progress (this release is part of that work). Direct clone / symlink remain the only install methods.
+
 ## [0.11.1-alpha] - 2026-04-28
 
 Patch release fixing Ollama vision detection and extending the same `/api/show` capability check to tool calling and thinking. Reported by @MuhvICo on issue #8.
